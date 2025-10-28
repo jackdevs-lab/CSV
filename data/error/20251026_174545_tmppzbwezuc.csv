@@ -1,0 +1,8 @@
+Patient ID,Invoice No.,Patient Name,Date of Visit,Due Date,Terms of Payment,Location,Memo,Product / Service,Description,Is Insurance?,Mode of Payment,Quantity,Unit Cost,Total Amount,Service Date
+16890,69225,John Mwangi,2025-10-01,2025-10-01,Due on receiptConsultation,"",No,MPESA,1,1500,1500,2025-10-01
+16891,69226,Mary Wanjiru,2025-10-02,2025-10-02,Due on receiptConsultation,"",Yes,VISA,2,1200,2400,2025-10-02
+16892,69227,Peter Ochieng,2025-10-03,2025-10-03,Due on receiptConsultation,"",No,SHA-SHIF,1,1800,1800,2025-10-03
+16893,69228,Grace Auma,2025-10-04,2025-10-04,Due on receiptConsultation,"",Yes,MPESA,3,1000,3000,2025-10-04
+16894,69229,James Otieno,2025-10-05,2025-10-05,Due on receiptConsultation,"",No,VISA,1,2000,2000,2025-10-05
+16895,69230,Susan Nduta,2025-10-06,2025-10-06,Due on receiptConsultation,"",Yes,SHA-SHIF,2,1300,2600,2025-10-06
+16896,69231,David Kamau,2025-10-07,2025-10-07,Due on receiptConsultation,"",No,MPESA,1,1600,1600,2025-10-07

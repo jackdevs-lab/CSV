@@ -1,0 +1,11 @@
+Patient ID,Invoice No.,Patient Name,Date of Visit,Due Date,Terms of Payment,Location,Memo,Product / Service,Description,Is Insurance?,Mode of Payment,Quantity,Unit Cost,Total Amount,Service Date
+13345,64342,Alice Njeri,2025-10-27,2025-10-27,Due on receiptConsultationYes,SHA-SHIF MPESA,1,1500,1500,2025-10-27
+13345,64342,Alice Njeri,2025-10-27,2025-10-27,Due on receiptPharmacy,Paracetamol,No,MPESA,10,20,200,2025-10-27
+13346,64343,Brian Omondi,2025-10-27,2025-10-27,Due on receiptConsultationNo,VISA,1,2000,2000,2025-10-27
+13346,64343,Brian Omondi,2025-10-27,2025-10-27,Due on receiptLaboratory,Blood Test,No,CASH,1,300,300,2025-10-27
+13347,64344,Clara Wambui,2025-10-27,2025-10-27,Due on receiptConsultationYes,SHA-SHIF VISA,1,1800,1800,2025-10-27
+13347,64344,Clara Wambui,2025-10-27,2025-10-27,Due on receiptPharmacy,Antibiotic,No,VISA,5,50,250,2025-10-27
+13348,64345,David Kariuki,2025-10-27,2025-10-27,Due on receiptConsultationNo,MPESA,1,1500,1500,2025-10-27
+13348,64345,David Kariuki,2025-10-27,2025-10-27,Due on receiptLaboratory,Urine Test,Yes,SHA-SHIF MPESA,1,400,400,2025-10-27
+13349,64346,Eva Mukami,2025-10-27,2025-10-27,Due on receiptConsultationYes,SHA-SHIF,1,1600,1600,2025-10-27
+13349,64346,Eva Mukami,2025-10-27,2025-10-27,Due on receiptOther Request,Procedure,No,CASH,1,1000,1000,2025-10-27

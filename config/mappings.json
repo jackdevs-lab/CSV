@@ -1,0 +1,14 @@
+{
+  "services": {
+    "Consultation": "1",
+    "X-Ray": "2",
+    "Blood Test": "3",
+    "Physical Therapy": "4"
+  },
+  "customers": {
+    "Blue Cross": "1001",
+    "Aetna": "1002",
+    "John Doe": "2001",
+    "Jane Smith": "2002"
+  }
+}

@@ -1,0 +1,6 @@
+.env
+config/qb_tokens.json
+__pycache__
+*.pyc
+.vercel
+node_modules/

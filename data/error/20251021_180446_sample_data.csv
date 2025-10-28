@@ -1,0 +1,24 @@
+Patient ID,Invoice Number,Patient Name,Date of visit,Due date,Payer Type,Insurance Company,Memo,Service,Description,Payment Method,Quantity,Unit Cost,Total,Date of Service
+P001,57809,JANE WANGARI MURIUKI,6/1/2025,6/1/2025,Due on receiptPharmacy,Morphine Injection10mg/1ml,Cash,1,500,500,6/1/2025
+P002,58490,SEVELINA WAITHERA,10/1/2025,10/1/2025,Due on receiptPharmacy,Ondex 4mg Inj,Britam,1,300,405,10/1/2025
+P003,58575,MERCY WANGARI,1/1/2025,1/1/2025,Due on receiptPharmacy,Cytotec 200mcg (Misoprostal),M-Pesa,1,200,200,1/1/2025
+P004,58610,JOHN MWANGI,2/1/2025,2/1/2025,Due on receiptPharmacy,Amoxicillin 500mg Capsules,Cash,1,350,350,2/1/2025
+P005,58645,GRACE NJERI,3/1/2025,3/1/2025,Due on receiptPharmacy,Paracetamol Syrup 120mg/5ml,M-Pesa,1,150,150,3/1/2025
+P006,58678,EVANS OCHIENG,4/1/2025,4/1/2025,Due on receiptPharmacy,Diclofenac 50mg Tabs,Jubilee Insurance,2,100,200,4/1/2025
+P007,58701,VIVIAN WANJIKU,5/1/2025,5/1/2025,Due on receiptPharmacy,Zinc Sulphate 20mg,Cash,1,80,80,5/1/2025
+P008,58725,KELVIN OTIENO,6/1/2025,6/1/2025,Due on receiptPharmacy,Salbutamol Inhaler,NHIF,1,600,600,6/1/2025
+P009,58746,ANNE NJAMBI,7/1/2025,7/1/2025,Due on receiptPharmacy,Augmentin 625mg,M-Pesa,1,950,950,7/1/2025
+P010,58770,MICHAEL KIMANI,8/1/2025,8/1/2025,Due on receiptPharmacy,Metformin 500mg,Cash,1,500,500,8/1/2025
+P011,58795,ELIZABETH WANJIRU,9/1/2025,9/1/2025,Due on receiptPharmacy,Insulin 100IU/ml Vial,AAR Insurance,1,"1,200","1,200",9/1/2025
+P012,58820,SAMUEL KARIUKI,11/1/2025,11/1/2025,Due on receiptPharmacy,Ciprofloxacin 500mg Tabs,Cash,1,450,450,11/1/2025
+P013,58856,FLORENCE MUTHONI,12/1/2025,12/1/2025,Due on receiptPharmacy,Omeprazole 20mg Caps,M-Pesa,1,200,200,12/1/2025
+P014,58888,JAMES OTIENO,13/1/2025,13/1/2025,Due on receiptPharmacy,Hydrocortisone Cream 1%,Cash,1,350,350,13/1/2025
+P015,58912,DORCAS NJOKI,14/1/2025,14/1/2025,Due on receiptPharmacy,Amoxiclav Suspension,Britam Insurance,1,800,800,14/1/2025
+P016,58935,BRIAN MAINA,15/1/2025,15/1/2025,Due on receiptPharmacy,Folic Acid 5mg Tabs,Cash,1,100,100,15/1/2025
+P017,58967,ANGELA NJOROGE,16/1/2025,16/1/2025,Due on receiptPharmacy,Coartem 20/120 Tabs,M-Pesa,1,500,500,16/1/2025
+P018,59001,MARTIN KOECH,17/1/2025,17/1/2025,Due on receiptPharmacy,Ranitidine 150mg Tabs,Jubilee Insurance,1,250,250,17/1/2025
+P019,59028,PAULINE KANINI,18/1/2025,18/1/2025,Due on receiptPharmacy,Dexamethasone Inj 4mg,NHIF,1,400,400,18/1/2025
+P020,59060,FRANCIS MWAI,19/1/2025,19/1/2025,Due on receiptPharmacy,Vitamin B Complex Tabs,Cash,1,300,300,19/1/2025
+P021,59090,STELLA AUMA,20/1/2025,20/1/2025,Due on receiptPharmacy,Ibuprofen 400mg Tabs,M-Pesa,2,100,200,20/1/2025
+P022,59115,CHARLES OMONDI,21/1/2025,21/1/2025,Due on receiptPharmacy,Oral Rehydration Salts (ORS),Cash,1,50,50,21/1/2025
+P023,59145,LUCY WANJIRU,22/1/2025,22/1/2025,Due on receiptPharmacy,Ferrous Sulphate 200mg,AAR Insurance,1,200,200,22/1/2025
