@@ -211,7 +211,7 @@ def upload_file():
     
     logger.error("Invalid file format, CSV required")
     return jsonify({'success': False, 'logs': log_stream.getvalue()})
-
+application = app
 
 if __name__ == '__main__':
     app.run(debug=True)
