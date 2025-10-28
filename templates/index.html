@@ -1,0 +1,13 @@
+@"
+<!DOCTYPE html>
+<html>
+<head><title>CSV Parser</title></head>
+<body>
+  <h1>IT WORKS!</h1>
+  <form action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".csv">
+    <button type="submit">Upload</button>
+  </form>
+</body>
+</html>
+"@ | Out-File -FilePath "templates/index.html" -Encoding utf8
