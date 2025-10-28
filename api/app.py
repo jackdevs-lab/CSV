@@ -1,18 +1,10 @@
-from flask import Flask, request, render_template, jsonify
-import os
+# api/app.py
+from flask import Flask, request, render_template, jsonify, redirect
 import sys
 from pathlib import Path
-import logging
-from io import StringIO
-import pandas as pd
-import tempfile
-from flask import redirect
-from werkzeug.middleware.proxy_fix import ProxyFix  # ✅ add this
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
-
-# Add project root to sys.path
-sys.path.append(str(Path(__file__).parent))
+# Add src/ to path
+sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from src.csv_parser import CSVParser
 from src.mapper import TransactionMapper
@@ -24,16 +16,28 @@ from src.qb_auth import QuickBooksAuth
 from src.qb_client import QuickBooksClient
 from src.logger import setup_logger, log_processing_result
 
-# Set up Flask app
-app = Flask(__name__, template_folder="templates", static_folder="static")
+import pandas as pd
+import tempfile
+import logging
+from io import StringIO
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+# Environment
+import os
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
+# Flask app
+app = Flask(__name__, template_folder="../templates", static_folder="../static")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
-# Set up logger and capture logs for UI
+
+# Logger
 logger = setup_logger(__name__)
 log_stream = StringIO()
 handler = logging.StreamHandler(log_stream)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
+# === Reuse your process_csv_file function ===
 def process_csv_file(file_path):
     """Main processing workflow for CSV files from file path"""
     try:
@@ -157,7 +161,31 @@ def process_csv_file(file_path):
         logger.error(f"Failed to process CSV: {str(e)}")
         return False, log_stream.getvalue()
 
+# === Routes ===
+@app.route('/')
+def index():
+    return render_template('index.html')
 
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        logger.error("No file uploaded")
+        return jsonify({'success': False, 'logs': log_stream.getvalue()})
+    
+    file = request.files['file']
+    if file.filename == '' or not file.filename.endswith('.csv'):
+        logger.error("Invalid file")
+        return jsonify({'success': False, 'logs': log_stream.getvalue()})
+
+    log_stream.truncate(0)
+    log_stream.seek(0)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
+        file.save(temp_file.name)
+        temp_file_path = temp_file.name
+
+    success, logs = process_csv_file(temp_file_path)
+    return jsonify({'success': success, 'logs': logs})
 
 @app.route('/login')
 def login():
@@ -176,42 +204,4 @@ def callback():
         "tokens": tokens
     })
 
-@app.route('/')
-def index():
-    """Render the main page with file upload and log display"""
-    return render_template('index.html')
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    """Handle file upload and process CSV"""
-    if 'file' not in request.files:
-        logger.error("No file uploaded")
-        return jsonify({'success': False, 'logs': log_stream.getvalue()})
-    
-    file = request.files['file']
-    if file.filename == '':
-        logger.error("No file selected")
-        return jsonify({'success': False, 'logs': log_stream.getvalue()})
-
-    if file and file.filename.endswith('.csv'):
-        # Reset log stream for new processing
-        log_stream.truncate(0)
-        log_stream.seek(0)
-        
-        # Save uploaded file to a temporary location
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
-            file.save(temp_file.name)
-            temp_file_path = temp_file.name
-
-        # Process the temporary file
-        success, logs = process_csv_file(temp_file_path)
-        
-        # File is moved by log_processing_result, so no need to delete here
-        return jsonify({'success': success, 'logs': logs})
-    
-    logger.error("Invalid file format, CSV required")
-    return jsonify({'success': False, 'logs': log_stream.getvalue()})
-application = app
-
-if __name__ == '__main__':
-    app.run(debug=True)
+# Vercel auto-detects this file — no need for `application = app`
