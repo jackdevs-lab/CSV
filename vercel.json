@@ -1,12 +1,29 @@
 {
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.py"
+    }
+  ],
   "functions": {
     "api/index.py": {
-      "runtime": "python3.9"
-    }
-  },
-  "build": {
-    "env": {
-      "PYTHON_VERSION": "3.9"
+      "runtime": "python3.9",
+      "memory": 1024,
+      "maxDuration": 30
     }
   }
 }
