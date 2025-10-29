@@ -27,7 +27,7 @@ import os
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 # Flask app
-app = Flask(__name__, template_folder="../templates", static_folder="../static")
+app = Flask(__name__, template_folder="templates", static_folder="static")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 # Logger
