@@ -1,11 +1,25 @@
-# api/app.py
+# app.py  (place in project root)
 from flask import Flask, request, render_template, jsonify, redirect
 import sys
 from pathlib import Path
+import os
+import logging
+from io import StringIO
+import pandas as pd
+import tempfile
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-# Add src/ to path
-sys.path.append(str(Path(__file__).parent.parent / "src"))
+# ----------------------------------------------------------------------
+# 1. Environment & path setup
+# ----------------------------------------------------------------------
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
+# Add src/ to Python path (relative to root app.py)
+sys.path.append(str(Path(__file__).parent / "src"))
+
+# ----------------------------------------------------------------------
+# 2. Import your own modules
+# ----------------------------------------------------------------------
 from src.csv_parser import CSVParser
 from src.mapper import TransactionMapper
 from src.customer_service import CustomerService
@@ -16,28 +30,24 @@ from src.qb_auth import QuickBooksAuth
 from src.qb_client import QuickBooksClient
 from src.logger import setup_logger, log_processing_result
 
-import pandas as pd
-import tempfile
-import logging
-from io import StringIO
-from werkzeug.middleware.proxy_fix import ProxyFix
-
-# Environment
-import os
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-
-# Flask app
+# ----------------------------------------------------------------------
+# 3. Flask app + ProxyFix
+# ----------------------------------------------------------------------
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-# Logger
+# ----------------------------------------------------------------------
+# 4. Logger that captures output for the UI
+# ----------------------------------------------------------------------
 logger = setup_logger(__name__)
 log_stream = StringIO()
 handler = logging.StreamHandler(log_stream)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
-# === Reuse your process_csv_file function ===
+# ----------------------------------------------------------------------
+# 5. Core CSV processing (exact copy of your original function)
+# ----------------------------------------------------------------------
 def process_csv_file(file_path):
     """Main processing workflow for CSV files from file path"""
     try:
@@ -54,7 +64,11 @@ def process_csv_file(file_path):
         logger.info(f"Successfully parsed CSV with {len(df)} rows")
 
         # Validate required columns
-        required_columns = ['Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service', 'Description', 'Total Amount', 'Quantity', 'Unit Cost', 'Service Date', 'Mode of Payment']
+        required_columns = [
+            'Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service',
+            'Description', 'Total Amount', 'Quantity', 'Unit Cost',
+            'Service Date', 'Mode of Payment'
+        ]
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             logger.error(f"Missing required CSV columns: {missing_columns}")
@@ -65,20 +79,26 @@ def process_csv_file(file_path):
 
         for invoice_num, group in grouped:
             try:
-                # Step 1: Find or create customer
-                mapper = TransactionMapper()  # Ensure mapper is initialized here
+                # ---- Customer -------------------------------------------------
+                mapper = TransactionMapper()  # fresh instance per invoice
                 is_insurance = mapper.is_insurance_transaction(group)
                 if is_insurance:
                     insurance_name = mapper.extract_insurance_name(group)
                     if insurance_name:
-                        customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="insurance", insurance_name=insurance_name)
+                        customer_id = customer_service.find_or_create_customer(
+                            group, mapper, customer_type="insurance",
+                            insurance_name=insurance_name
+                        )
                     else:
-                        # Fallback to patient if no insurance name found despite Is Insurance? = Yes
-                        customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
+                        customer_id = customer_service.find_or_create_customer(
+                            group, mapper, customer_type="patient"
+                        )
                 else:
-                    customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
+                    customer_id = customer_service.find_or_create_customer(
+                        group, mapper, customer_type="patient"
+                    )
 
-                # Step 2: Process items
+                # ---- Line items ---------------------------------------------
                 lines = []
                 for _, row in group.iterrows():
                     item_id = product_service.find_or_create_product(row, invoice_num)
@@ -86,28 +106,31 @@ def process_csv_file(file_path):
                     unit_price = float(row['Unit Cost'])
                     calculated_amount = qty * unit_price
                     if abs(calculated_amount - float(row['Total Amount'])) > 0.01:
-                        logger.warning(f"Mismatched amount for invoice {invoice_num}, item {row['Product / Service']}: CSV Total {row['Total Amount']} != {qty} * {unit_price}. Using calculated {calculated_amount}.")
-                    
+                        logger.warning(
+                            f"Mismatched amount for invoice {invoice_num}, "
+                            f"item {row['Product / Service']}: "
+                            f"CSV Total {row['Total Amount']} != {qty} * {unit_price}. "
+                            f"Using calculated {calculated_amount}."
+                        )
                     if calculated_amount == 0:
-                        logger.warning(f"Skipping zero-amount line for invoice {invoice_num}, item {row['Product / Service']}.")
+                        logger.warning(
+                            f"Skipping zero-amount line for invoice {invoice_num}, "
+                            f"item {row['Product / Service']}."
+                        )
                         continue
-                    # Apply insurance markup rules before line creation
+
+                    # Insurance markup
                     is_insurance_row = str(row.get('Is Insurance?', '')).strip().lower() == 'yes'
                     category = str(row.get('Product / Service', '')).strip()
-
-                    # Define markup rules
                     markup_map = {
                         'Pharmacy': 1.35,
                         'Laboratory': 1.20,
                         'Radiology': 1.25
                     }
-
-                    # Compute effective unit price
-                    if is_insurance_row and category in markup_map:
-                        adjusted_unit_price = round(unit_price * markup_map[category], 2)
-                    else:
-                        adjusted_unit_price = unit_price
-
+                    adjusted_unit_price = (
+                        round(unit_price * markup_map[category], 2)
+                        if is_insurance_row and category in markup_map else unit_price
+                    )
                     calculated_amount = round(qty * adjusted_unit_price, 2)
 
                     line = {
@@ -122,14 +145,14 @@ def process_csv_file(file_path):
                     }
                     lines.append(line)
 
-                # Step 3: Create sales receipt or invoice
+                # ---- Transaction type -----------------------------------------
                 transaction_type = mapper.determine_transaction_type(group)
                 if transaction_type == "sales_receipt":
                     result = receipt_service.create_sales_receipt(group, customer_id, lines)
-                    logger.info(f"Created sales receipt for patient payment on invoice {invoice_num}")
+                    logger.info(f"Created sales receipt for invoice {invoice_num}")
                 elif transaction_type == "invoice":
                     result = invoice_service.create_invoice(group, customer_id, lines)
-                    logger.info(f"Created invoice for insurance payment on invoice {invoice_num}")
+                    logger.info(f"Created invoice for invoice {invoice_num}")
                 else:
                     logger.warning(f"Unknown transaction type '{transaction_type}' for invoice {invoice_num}")
                     results.append({
@@ -154,14 +177,17 @@ def process_csv_file(file_path):
                     "error": str(e)
                 })
 
-        log_processing_result(file_path, results)  # Use file_path for moving
+        # Move processed file (your log_processing_result does this)
+        log_processing_result(file_path, results)
         return True, log_stream.getvalue()
 
     except Exception as e:
         logger.error(f"Failed to process CSV: {str(e)}")
         return False, log_stream.getvalue()
 
-# === Routes ===
+# ----------------------------------------------------------------------
+# 6. Routes
+# ----------------------------------------------------------------------
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -171,20 +197,21 @@ def upload_file():
     if 'file' not in request.files:
         logger.error("No file uploaded")
         return jsonify({'success': False, 'logs': log_stream.getvalue()})
-    
+
     file = request.files['file']
-    if file.filename == '' or not file.filename.endswith('.csv'):
+    if file.filename == '' or not file.filename.lower().endswith('.csv'):
         logger.error("Invalid file")
         return jsonify({'success': False, 'logs': log_stream.getvalue()})
 
+    # Reset log stream for this request
     log_stream.truncate(0)
     log_stream.seek(0)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
-        file.save(temp_file.name)
-        temp_file_path = temp_file.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
+        file.save(tmp.name)
+        tmp_path = tmp.name
 
-    success, logs = process_csv_file(temp_file_path)
+    success, logs = process_csv_file(tmp_path)
     return jsonify({'success': success, 'logs': logs})
 
 @app.route('/login')
@@ -204,4 +231,16 @@ def callback():
         "tokens": tokens
     })
 
-# Vercel auto-detects this file — no need for `application = app`
+# ----------------------------------------------------------------------
+# 7. Vercel entry-point (required for serverless)
+# ----------------------------------------------------------------------
+def handler(event, context=None):
+    """Vercel serverless function wrapper."""
+    from werkzeug.serving import run_simple
+    return run_simple('0.0.0.0', int(os.environ.get('PORT', 3000)), app, use_reloader=False, use_debugger=False)
+
+# ----------------------------------------------------------------------
+# 8. Local dev entry-point
+# ----------------------------------------------------------------------
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)), debug=True)
