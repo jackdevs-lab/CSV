@@ -33,7 +33,11 @@ from src.logger import setup_logger, log_processing_result
 # ----------------------------------------------------------------------
 # 3. Flask app + ProxyFix
 # ----------------------------------------------------------------------
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(
+    __name__,
+    template_folder="../templates",
+    static_folder="../static"
+)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 # ----------------------------------------------------------------------
