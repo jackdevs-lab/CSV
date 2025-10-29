@@ -38,7 +38,6 @@ app = Flask(
     template_folder="../templates",
     static_folder="../static"
 )
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 # ----------------------------------------------------------------------
 # 4. Logger that captures output for the UI
