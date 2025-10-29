@@ -234,10 +234,7 @@ def callback():
 # ----------------------------------------------------------------------
 # 7. Vercel entry-point (required for serverless)
 # ----------------------------------------------------------------------
-def handler(event, context=None):
-    """Vercel serverless function wrapper."""
-    from werkzeug.serving import run_simple
-    return run_simple('0.0.0.0', int(os.environ.get('PORT', 3000)), app, use_reloader=False, use_debugger=False)
+
 
 # ----------------------------------------------------------------------
 # 8. Local dev entry-point
