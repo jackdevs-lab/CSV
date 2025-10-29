@@ -35,8 +35,8 @@ from src.logger import setup_logger, log_processing_result
 # ----------------------------------------------------------------------
 app = Flask(
     __name__,
-    template_folder="../templates",
-    static_folder="../static"
+    template_folder="templates",
+    static_folder="static"
 )
 
 # ----------------------------------------------------------------------
@@ -242,5 +242,5 @@ def callback():
 # ----------------------------------------------------------------------
 # 8. Local dev entry-point
 # ----------------------------------------------------------------------
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)), debug=True)
+#if __name__ == '__main__':
+  #  app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)), debug=True)
