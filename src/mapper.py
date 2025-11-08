@@ -80,3 +80,33 @@ class TransactionMapper:
     def add_customer_mapping(self, customer_name, customer_id):
         self.mappings['customers'][customer_name] = customer_id
         self._save_mappings()
+    def map_income_account(self, new_description: str) -> dict:
+        name = (new_description or "").strip().lower()
+
+        # === PHARMACY ===
+        pharmacy_keywords = ["pharmacy", "pharm", "dispense", "medication", "oahar amcy", "oaharamcy"]
+        if any(k in name for k in pharmacy_keywords):
+            return {"value": "1150040007", "name": "Pharmacy"}
+
+        # === CONSULTATION ===
+        consult_keywords = ["consultation", "consult", "doctor visit", "opd"]
+        if any(k in name for k in consult_keywords):
+            return {"value": "1150040003", "name": "Consultation Income"}
+
+        # === LABORATORY ===
+        lab_keywords = ["laboratory", "lab", "blood test", "urine", "scan", "x-ray", "imaging"]
+        if any(k in name for k in lab_keywords):
+            return {"value": "1150040004", "name": "Lab Tests"}
+
+        # === GYN & MINOR PROCEDURES ===
+        gyn_keywords = ["gyn", "gyne", "minor procedure", "procedure", "iud", "pap smear"]
+        if any(k in name for k in gyn_keywords):
+            return {"value": "1150040005", "name": "Gynaecology & Minor Procedures"}
+
+        # === THEATRE & INPATIENT ===
+        theatre_keywords = ["theatre", "surgery", "operation", "inpatient", "admission", "ward"]
+        if any(k in name for k in theatre_keywords):
+            return {"value": "1150040006", "name": "Theatre and Inpatient Services"}
+
+        # === DEFAULT ===
+        return {"value": "1150040008", "name": "Other Requests"}

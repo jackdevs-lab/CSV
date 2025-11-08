@@ -2,6 +2,8 @@ import pandas as pd
 from src.logger import setup_logger
 import requests
 import time
+from src.mapper import TransactionMapper
+
 
 logger = setup_logger(__name__)
 
@@ -11,6 +13,8 @@ class ProductService:
     def __init__(self, qb_client):
         self.qb_client = qb_client
         self.item_cache = {}  # Cache for item IDs
+        self.mapper = TransactionMapper()  # ✅ Add this line
+
 
     def find_or_create_product(self, row, invoice_id):
         """Find or create product in QuickBooks. Returns item ID (guaranteed)."""
@@ -18,6 +22,7 @@ class ProductService:
         # Extract and normalize fields
         product = (row.get('Product / Service') or '').strip()
         description = (row.get('Description') or '').strip()
+        original_product = (row.get('Product / Service') or '').strip().lower()
 
         # Handle NaN or invalid values
         if pd.isna(product) or not product:
@@ -55,15 +60,16 @@ class ProductService:
         except (ValueError, TypeError):
             unit_cost = 200.0
             logger.warning(f"Invalid or missing Unit Cost for '{service_name}' in invoice {invoice_id}, defaulting to {unit_cost}")
-
+        income_account_ref = self.mapper.map_income_account(original_product)
         # Step 3: Prepare item payload with swapped fields
         item_data = {
-            "Name": sanitized_name,  # Use sanitized swapped description as name
-            "Type": "Service",
-            "IncomeAccountRef": {"value": "132", "name": "Sales of Product Income"},
-            "UnitPrice": unit_cost,
-            "Description": new_description[:4000]  # Use original product/service as description
-        }
+        "Name": sanitized_name,
+        "Type": "Service",
+        "IncomeAccountRef": income_account_ref,  # dynamically loaded from JSON
+        "UnitPrice": unit_cost,
+        "Description": new_description[:4000]
+    }
+
 
         # Step 4: Try creating the item
         try:
