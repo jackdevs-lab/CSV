@@ -12,6 +12,13 @@ from app import app
 @app.route('/disconnect')
 def disconnect():
         return render_template('disconnect.html')
+@app.route('/eula')
+def eula():
+    return render_template('eula.html')
+
+@app.route('/privacy')
+def privacy():
+    return render_template('privacy.html')
 app = app  # Optional, but clear
 application = app
 # Vercel looks for `application` or `app`

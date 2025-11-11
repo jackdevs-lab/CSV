@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>End User License Agreement (EULA) - QuickBooks CSV Sync</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            min-height: 100vh;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .last-updated {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 2rem;
+        }
+
+        h2 {
+            color: #667eea;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #667eea;
+        }
+
+        h3 {
+            color: #764ba2;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            font-size: 1.2rem;
+        }
+
+        p, li {
+            margin-bottom: 0.75rem;
+        }
+
+        ul, ol {
+            margin-left: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .highlight-box {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .consent-section {
+            background: #e8f5e9;
+            border: 2px solid #4caf50;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            text-align: center;
+        }
+
+        .consent-checkbox {
+            margin-top: 1rem;
+        }
+
+        .consent-checkbox label {
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .consent-checkbox input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        footer {
+            background: #2c3e50;
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .contact-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        .nav-links {
+            margin-top: 1rem;
+        }
+
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            margin: 0 1rem;
+            opacity: 0.9;
+        }
+
+        .nav-links a:hover {
+            opacity: 1;
+            text-decoration: underline;
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+            header {
+                background: #667eea;
+                color: white;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>End User License Agreement (EULA)</h1>
+            <p class="last-updated">Last Updated: November 12, 2025</p>
+        </header>
+
+        <div class="content">
+            <h2>1. Acceptance of Terms</h2>
+            <p>By accessing or using this QuickBooks CSV Sync application ("the App"), you agree to be bound by this End User License Agreement. If you do not agree to these terms, do not use the App.</p>
+
+            <h2>2. Grant of License</h2>
+            <p>We grant you a limited, non-exclusive, non-transferable, revocable license to use the App for your business purposes in accordance with this Agreement.</p>
+
+            <h2>3. User Authorization and Data Access</h2>
+            
+            <h3>3.1 QuickBooks Integration</h3>
+            <ul>
+                <li>You authorize the App to access your QuickBooks data for the sole purpose of CSV data synchronization.</li>
+                <li>You grant permission to read, write, and update records in your QuickBooks account as necessary for the App's functionality.</li>
+                <li>You are responsible for maintaining the security of your QuickBooks credentials.</li>
+            </ul>
+
+            <h3>3.2 Scope of Access</h3>
+            <p>The App will access:</p>
+            <ul>
+                <li>Customer and vendor information</li>
+                <li>Transaction data (invoices, bills, payments)</li>
+                <li>Chart of accounts and financial records</li>
+                <li>Other data necessary for CSV synchronization</li>
+            </ul>
+
+            <h2>4. Data Usage and Protection</h2>
+            
+            <div class="highlight-box">
+                <h3>4.1 Data Processing</h3>
+                <ul>
+                    <li><strong>Your data is processed solely to provide CSV synchronization services.</strong></li>
+                    <li><strong>We do not sell, rent, or share your data with third parties for marketing purposes.</strong></li>
+                    <li>Data is transmitted securely using industry-standard encryption (HTTPS/TLS).</li>
+                </ul>
+            </div>
+
+            <h3>4.2 Data Storage</h3>
+            <ul>
+                <li>QuickBooks authentication tokens are stored securely on Vercel's infrastructure.</li>
+                <li>CSV files are processed in memory and not permanently stored on our servers unless explicitly saved by you.</li>
+                <li>You retain all ownership rights to your data.</li>
+            </ul>
+
+            <h2>5. User Responsibilities</h2>
+            <p>You agree to:</p>
+            <ul>
+                <li>Provide accurate information</li>
+                <li>Maintain the confidentiality of your account credentials</li>
+                <li>Use the App in compliance with all applicable laws and regulations</li>
+                <li>Not attempt to reverse engineer, decompile, or disassemble the App</li>
+                <li>Not use the App for any illegal or unauthorized purpose</li>
+            </ul>
+
+            <h2>6. Prohibited Activities</h2>
+            <div class="warning-box">
+                <p><strong>You may not:</strong></p>
+                <ul>
+                    <li>Use the App to transmit malicious code or viruses</li>
+                    <li>Attempt to gain unauthorized access to other users' accounts</li>
+                    <li>Interfere with or disrupt the App's servers or networks</li>
+                    <li>Violate any applicable local, national, or international law</li>
+                </ul>
+            </div>
+
+            <h2>7. Intellectual Property</h2>
+            
+            <h3>7.1 Ownership</h3>
+            <ul>
+                <li>The App, including all code, features, and functionality, is owned by us and protected by copyright and other intellectual property laws.</li>
+                <li>Your data remains your property at all times.</li>
+            </ul>
+
+            <h3>7.2 Trademarks</h3>
+            <ul>
+                <li>QuickBooks is a trademark of Intuit Inc.</li>
+                <li>All trademarks are the property of their respective owners.</li>
+            </ul>
+
+            <h2>8. Service Availability</h2>
+            <ul>
+                <li>We strive for 99% uptime but do not guarantee uninterrupted service.</li>
+                <li>We reserve the right to modify, suspend, or discontinue the App at any time.</li>
+                <li>Scheduled maintenance will be communicated in advance when possible.</li>
+            </ul>
+
+            <h2>9. Limitation of Liability</h2>
+            <div class="warning-box">
+                <p><strong>TO THE MAXIMUM EXTENT PERMITTED BY LAW:</strong></p>
+                <ul>
+                    <li>The App is provided "as is" without warranties of any kind.</li>
+                    <li>We are not liable for any indirect, incidental, special, or consequential damages.</li>
+                    <li>Our total liability shall not exceed the fees paid by you in the 12 months preceding the claim.</li>
+                </ul>
+            </div>
+
+            <h2>10. Indemnification</h2>
+            <p>You agree to indemnify and hold us harmless from any claims, damages, or expenses arising from:</p>
+            <ul>
+                <li>Your use of the App</li>
+                <li>Your violation of this Agreement</li>
+                <li>Your violation of any rights of another party</li>
+            </ul>
+
+            <h2>11. Termination</h2>
+            
+            <h3>11.1 By You</h3>
+            <p>You may terminate this Agreement at any time by:</p>
+            <ul>
+                <li>Disconnecting your QuickBooks account</li>
+                <li>Ceasing to use the App</li>
+                <li>Requesting account deletion via email</li>
+            </ul>
+
+            <h3>11.2 By Us</h3>
+            <p>We may terminate or suspend your access immediately if you:</p>
+            <ul>
+                <li>Breach this Agreement</li>
+                <li>Engage in fraudulent or illegal activities</li>
+                <li>Fail to pay applicable fees (if any)</li>
+            </ul>
+
+            <h3>11.3 Effect of Termination</h3>
+            <p>Upon termination:</p>
+            <ul>
+                <li>Your license to use the App ends immediately</li>
+                <li>We will delete your authentication tokens within 30 days</li>
+                <li>Certain provisions (liability, indemnification) survive termination</li>
+            </ul>
+
+            <h2>12. Changes to Terms</h2>
+            <ul>
+                <li>We may modify this Agreement at any time.</li>
+                <li>Continued use after changes constitutes acceptance of new terms.</li>
+                <li>Material changes will be notified via email or in-app notification.</li>
+            </ul>
+
+            <h2>13. Governing Law</h2>
+            <p>This Agreement is governed by:</p>
+            <ul>
+                <li>The laws of Kenya (for Kenya-based users)</li>
+                <li>International data protection standards (GDPR compliance)</li>
+            </ul>
+
+            <h2>14. Dispute Resolution</h2>
+            <ul>
+                <li>Any disputes shall first be attempted to be resolved through good-faith negotiation.</li>
+                <li>If unresolved, disputes will be subject to binding arbitration.</li>
+                <li>You may also have rights under consumer protection laws in your jurisdiction.</li>
+            </ul>
+
+            <h2>15. Severability</h2>
+            <p>If any provision of this Agreement is found unenforceable, the remaining provisions remain in full effect.</p>
+
+            <h2>16. Entire Agreement</h2>
+            <p>This Agreement constitutes the entire agreement between you and us regarding the App and supersedes any prior agreements.</p>
+
+            <h2>17. Contact Information</h2>
+            <div class="contact-info">
+                <p><strong>For questions about this Agreement, contact us at:</strong></p>
+                <p>Email: <strong>info@domfin.co.ke</strong></p>
+                <p>Address: <strong>CPA Center 1st Floor, Right Wing</strong></p>
+            </div>
+
+            <h2>18. Acknowledgment</h2>
+            <div class="consent-section">
+                <p><strong>By clicking "Accept" or using the App, you acknowledge that you have read, understood, and agree to be bound by this Agreement.</strong></p>
+                <div class="consent-checkbox">
+                    <label>
+                        <input type="checkbox" id="eulaConsent">
+                        I have read and agree to the End User License Agreement
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>&copy; 2025 Gyno Solutions. All rights reserved.</p>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/privacy">Privacy Policy</a>
+                <a href="/eula">EULA</a>
+                <a href="/contact">Contact</a>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Optional: Add scroll-to-top functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const checkbox = document.getElementById('eulaConsent');
+            
+            checkbox.addEventListener('change', function() {
+                if (this.checked) {
+                    console.log('User accepted EULA');
+                    // You can trigger additional actions here
+                    // e.g., enable a "Continue" button, store consent, etc.
+                }
+            });
+        });
+    </script>
+</body>
+</html>
