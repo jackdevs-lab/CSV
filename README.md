@@ -32,9 +32,9 @@ The app reads CSV files matching the expected schema, groups rows by invoice num
 
 ## Prerequisites
 
-- Python 3.10+ (project assumes modern Python; adjust as needed)
+- Python 3.10+ 
 - pip
-- A QuickBooks developer account and API credentials (stored in `config/qb_tokens.json`)
+- A QuickBooks developer account and API credentials (stored in `.env`)
 
 ## Installation
 
@@ -54,16 +54,16 @@ python -m pip install -r requirements.txt
 3. (Optional) Run tests to verify the environment:
 
 ```powershell
-python -m pytest -q
+vercel dev 
 ```
 
 ## Configuration
 
 - `config/mappings.json` — product/category mappings used by the mapper.
-- `config/qb_tokens.json` — QuickBooks API tokens and credentials. Keep this file secure and do not commit secrets to source control.
+- `.env` — QuickBooks API tokens and credentials. Keep this file secure and do not commit secrets to source control.
 - `config/settings.py` — basic app settings.
 
-Make sure `config/qb_tokens.json` is populated before attempting to process CSVs that will communicate with QuickBooks.
+Make sure `.env` is populated before attempting to process CSVs that will communicate with QuickBooks.
 
 ## Usage
 
@@ -112,19 +112,7 @@ The tests in `tests/` include unit tests for the CSV parser, mapper, and QuickBo
 - Ensure CSV files include the required columns:
 	- `Invoice No.`, `Patient Name`, `Patient ID`, `Product / Service`, `Description`, `Total Amount`, `Quantity`, `Unit Cost`, `Service Date`, `Mode of Payment`
 
-## Contributing
+#
 
-Contributions are welcome. Open an issue or submit a pull request. Please include tests for new behaviors and keep configuration/secrets out of commits.
 
-## License
-
-This project is provided under the MIT License — see `LICENSE` if present, or add one if you plan to open-source the code.
-
----
-
-If you'd like, I can also:
-- Add a sample `config/qb_tokens.json.example` file (no secrets) to document required fields.
-- Add a short developer quickstart script to simplify virtualenv + install.
-
-If you want any of those, tell me which and I'll add them.
 

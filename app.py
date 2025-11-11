@@ -7,6 +7,7 @@ import logging
 from io import StringIO
 import pandas as pd
 import tempfile
+from decimal import Decimal, ROUND_HALF_UP
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 # ----------------------------------------------------------------------
@@ -38,6 +39,7 @@ app = Flask(
     template_folder="templates",
     static_folder="static"
 )
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 # ----------------------------------------------------------------------
 # 4. Logger that captures output for the UI
@@ -49,7 +51,7 @@ handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)
 logger.addHandler(handler)
 
 # ----------------------------------------------------------------------
-# 5. Core CSV processing (exact copy of your original function)
+# 5. Core CSV processing
 # ----------------------------------------------------------------------
 def process_csv_file(file_path):
     """Main processing workflow for CSV files from file path"""
@@ -60,10 +62,9 @@ def process_csv_file(file_path):
         product_service = ProductService(qb_client)
         invoice_service = InvoiceService(qb_client)
         receipt_service = ReceiptService(qb_client)
-        mapper = TransactionMapper()
 
         parser = CSVParser()
-        df = parser.parse_file(file_path)  # Parse from file path
+        df = parser.parse_file(file_path)
         logger.info(f"Successfully parsed CSV with {len(df)} rows")
 
         # Validate required columns
@@ -80,84 +81,151 @@ def process_csv_file(file_path):
         results = []
         grouped = df.groupby('Invoice No.')
 
+        # --- Safe money parser ---
+        def parse_money(value):
+                if pd.isna(value):
+                    return Decimal('0.00')
+                # Convert to string, strip, remove commas and any non-numeric except . and -
+                s = str(value).strip()
+                s = ''.join(c for c in s if c in '0123456789.-')
+                if not s or s == '.' or s == '-':
+                    return Decimal('0.00')
+                try:
+                    return Decimal(s)
+                except:
+                    logger.warning(f"Failed to parse money: {value}")
+                    return Decimal('0.00')
+
+        # --- Line builder: one QB line per CSV row ---
+        def calculate_markup_factor(row):
+            """Calculate markup factor from CSV: Total Amount / (Unit Cost × Quantity)"""
+            try:
+                qty = Decimal(str(row['Quantity']))
+                unit_cost = parse_money(row['Unit Cost'])
+                total_amount = parse_money(row['Total Amount'])
+
+                if qty <= 0 or unit_cost <= 0 or total_amount <= 0:
+                    return Decimal('1.0')
+
+                expected = unit_cost * qty
+                if expected == 0:
+                    return Decimal('1.0')
+
+                factor = total_amount / expected
+                return factor.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+            except Exception as e:
+                logger.warning(f"Failed to calculate markup: {e}")
+                return Decimal('1.0')
+        def build_lines(group, invoice_num, for_invoice=False):
+                lines = []
+                for _, row in group.iterrows():
+                    item_id = product_service.find_or_create_product(row, invoice_num)
+                    logger.info(f"RAW CSV INPUT → Invoice={invoice_num} | Item='{row.get('Description', '')}' | Total Amount='{row.get('Total Amount', 'MISSING')}' | Type={type(row.get('Total Amount'))}")
+
+                    total_amount_csv = parse_money(row['Total Amount'])
+                    qty_csv = Decimal(str(row['Quantity'] or '1'))
+                    unit_cost_csv = parse_money(row['Unit Cost'])
+
+                    if total_amount_csv <= 0:
+                        logger.warning(f"Skipping zero/negative total: {row['Product / Service']}")
+                        continue
+
+                    # === CALCULATE MARKUP FACTOR FOR LOGGING ===
+                    markup_factor = calculate_markup_factor(row)
+
+                    description = str(row.get('Description', '') or '').strip()
+
+                    if for_invoice:
+                        # === INVOICE: USE CSV TOTAL (WITH MARKUP) ===
+                        qty_to_send = Decimal('1')
+                        unit_price = total_amount_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        amount = unit_price
+
+                        # Add original qty to description
+                        desc_parts = [description] if description else []
+                        if qty_csv != 1:
+                            desc_parts.append(f"Qty: {qty_csv}")
+                        full_desc = " | ".join(filter(None, desc_parts))
+
+                        line = {
+                            'DetailType': 'SalesItemLineDetail',
+                            'Amount': float(amount),
+                            'SalesItemLineDetail': {
+                                'ItemRef': {'value': str(item_id)},
+                                'Qty': 1.0,
+                                'UnitPrice': float(unit_price),
+                            },
+                            'Description': full_desc
+                        }
+
+                        logger.info(
+                            f"INVOICE → {row['Product / Service']} | "
+                            f"Qty={qty_csv} | Cost={unit_cost_csv} | CSV Total={total_amount_csv} | "
+                            f"Markup={markup_factor}x | "
+                            f"QB: Qty=1, UnitPrice={unit_price}, Amount={amount}"
+                        )
+
+                    else:
+                        # === SALES RECEIPT: NO MARKUP ===
+                        qty_to_send = float(qty_csv) if qty_csv > 0 else 1.0
+                        unit_price = float(unit_cost_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                        amount = float((Decimal(str(qty_to_send)) * unit_cost_csv).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+                        line = {
+                            'DetailType': 'SalesItemLineDetail',
+                            'Amount': amount,
+                            'SalesItemLineDetail': {
+                                'ItemRef': {'value': str(item_id)},
+                                'Qty': qty_to_send,
+                                'UnitPrice': unit_price,
+                            },
+                            'Description': description
+                        }
+
+                        logger.info(
+                            f"SALES RECEIPT → {row['Product / Service']} | "
+                            f"Qty={qty_csv}, UnitPrice={unit_price}, Amount={amount}"
+                        )
+
+                    lines.append(line)
+
+                return lines
+
+        # --- Process each invoice group ---
         for invoice_num, group in grouped:
             try:
-                # ---- Customer -------------------------------------------------
-                mapper = TransactionMapper()  # fresh instance per invoice
+                mapper = TransactionMapper()
                 is_insurance = mapper.is_insurance_transaction(group)
+
+                # --- Find or create customer ---
                 if is_insurance:
                     insurance_name = mapper.extract_insurance_name(group)
-                    if insurance_name:
-                        customer_id = customer_service.find_or_create_customer(
-                            group, mapper, customer_type="insurance",
-                            insurance_name=insurance_name
-                        )
-                    else:
-                        customer_id = customer_service.find_or_create_customer(
-                            group, mapper, customer_type="patient"
-                        )
+                    customer_id = customer_service.find_or_create_customer(
+                        group, mapper,
+                        customer_type="insurance" if insurance_name else "patient",
+                        insurance_name=insurance_name
+                    )
                 else:
                     customer_id = customer_service.find_or_create_customer(
                         group, mapper, customer_type="patient"
                     )
 
-                # ---- Line items ---------------------------------------------
-                lines = []
-                for _, row in group.iterrows():
-                    item_id = product_service.find_or_create_product(row, invoice_num)
-                    qty = float(row['Quantity'])
-                    unit_price = float(row['Unit Cost'])
-                    calculated_amount = qty * unit_price
-                    if abs(calculated_amount - float(row['Total Amount'])) > 0.01:
-                        logger.warning(
-                            f"Mismatched amount for invoice {invoice_num}, "
-                            f"item {row['Product / Service']}: "
-                            f"CSV Total {row['Total Amount']} != {qty} * {unit_price}. "
-                            f"Using calculated {calculated_amount}."
-                        )
-                    if calculated_amount == 0:
-                        logger.warning(
-                            f"Skipping zero-amount line for invoice {invoice_num}, "
-                            f"item {row['Product / Service']}."
-                        )
-                        continue
-
-                    # Insurance markup
-                    is_insurance_row = str(row.get('Is Insurance?', '')).strip().lower() == 'yes'
-                    category = str(row.get('Product / Service', '')).strip()
-                    markup_map = {
-                        'Pharmacy': 1.35,
-                        'Laboratory': 1.20,
-                        'Radiology': 1.25
-                    }
-                    adjusted_unit_price = (
-                        round(unit_price * markup_map[category], 2)
-                        if is_insurance_row and category in markup_map else unit_price
-                    )
-                    calculated_amount = round(qty * adjusted_unit_price, 2)
-
-                    line = {
-                        'DetailType': 'SalesItemLineDetail',
-                        'Amount': calculated_amount,
-                        'SalesItemLineDetail': {
-                            'ItemRef': {'value': item_id},
-                            'Qty': qty,
-                            'UnitPrice': adjusted_unit_price
-                        },
-                        'Description': row['Description']
-                    }
-                    lines.append(line)
-
-                # ---- Transaction type -----------------------------------------
+                # --- Determine transaction type BEFORE building lines ---
                 transaction_type = mapper.determine_transaction_type(group)
-                if transaction_type == "sales_receipt":
-                    result = receipt_service.create_sales_receipt(group, customer_id, lines)
-                    logger.info(f"Created sales receipt for invoice {invoice_num}")
-                elif transaction_type == "invoice":
+
+                # --- Build lines and send to QuickBooks ---
+                if transaction_type == "invoice":
+                    lines = build_lines(group, invoice_num, for_invoice=True)
                     result = invoice_service.create_invoice(group, customer_id, lines)
-                    logger.info(f"Created invoice for invoice {invoice_num}")
+                    logger.info(f"Created invoice for {invoice_num}")
+
+                elif transaction_type == "sales_receipt":
+                    lines = build_lines(group, invoice_num, for_invoice=False)
+                    result = receipt_service.create_sales_receipt(group, customer_id, lines)
+                    logger.info(f"Created sales receipt for {invoice_num}")
+
                 else:
-                    logger.warning(f"Unknown transaction type '{transaction_type}' for invoice {invoice_num}")
+                    logger.warning(f"Unknown transaction type '{transaction_type}' for {invoice_num}")
                     results.append({
                         "invoice": invoice_num,
                         "status": "error",
@@ -180,13 +248,13 @@ def process_csv_file(file_path):
                     "error": str(e)
                 })
 
-        # Move processed file (your log_processing_result does this)
         log_processing_result(file_path, results)
         return True, log_stream.getvalue()
 
     except Exception as e:
         logger.error(f"Failed to process CSV: {str(e)}")
         return False, log_stream.getvalue()
+
 
 # ----------------------------------------------------------------------
 # 6. Routes
@@ -227,7 +295,7 @@ def login():
 def callback():
     auth = QuickBooksAuth()
     tokens = auth.fetch_tokens(request.url)
-    realm_id = request.args.get("realmId")
+    realm_id = auth.get_realm_id()
     return jsonify({
         "status": "connected",
         "realmId": realm_id,
@@ -237,10 +305,10 @@ def callback():
 # ----------------------------------------------------------------------
 # 7. Vercel entry-point (required for serverless)
 # ----------------------------------------------------------------------
-
+# Vercel looks for `app` variable — nothing else needed
 
 # ----------------------------------------------------------------------
 # 8. Local dev entry-point
 # ----------------------------------------------------------------------
-#if __name__ == '__main__':
-  #  app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)), debug=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)), debug=True)
