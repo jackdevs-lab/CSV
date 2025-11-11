@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disconnect QuickBooks - CSV Sync</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 600px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+        }
+
+        .header h1 {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            opacity: 0.95;
+            font-size: 1rem;
+        }
+
+        .content {
+            padding: 2rem;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .warning-box h3 {
+            color: #856404;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .warning-box ul {
+            margin-left: 1.5rem;
+            color: #856404;
+        }
+
+        .warning-box li {
+            margin-bottom: 0.5rem;
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 4px;
+        }
+
+        .info-box h4 {
+            color: #1976d2;
+            margin-bottom: 0.5rem;
+        }
+
+        .checkbox-group {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+            cursor: pointer;
+        }
+
+        .checkbox-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 0.75rem;
+            margin-top: 0.15rem;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .checkbox-item label {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #dc2626;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+        }
+
+        .btn-danger:disabled {
+            background: #cbd5e1;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #4b5563;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(107, 114, 128, 0.4);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .success {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .success-icon {
+            font-size: 4rem;
+            color: #10b981;
+            margin-bottom: 1rem;
+        }
+
+        .success h2 {
+            color: #059669;
+            margin-bottom: 1rem;
+        }
+
+        .error {
+            display: none;
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+            color: #991b1b;
+        }
+
+        .account-info {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .account-info p {
+            margin-bottom: 0.5rem;
+        }
+
+        .account-info strong {
+            color: #667eea;
+        }
+
+        @media (max-width: 640px) {
+            .button-group {
+                flex-direction: column;
+            }
+
+            .header h1 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="icon">⚠️</div>
+            <h1>Disconnect QuickBooks Account</h1>
+            <p>Remove access to your QuickBooks data</p>
+        </div>
+
+        <div class="content">
+            <!-- Main Disconnect Form -->
+            <div id="disconnectForm">
+                <div class="account-info">
+                    <p><strong>Company:</strong> <span id="companyName">Gyno Solutions</span></p>
+                    <p><strong>Connected Since:</strong> <span id="connectedDate">January 15, 2025</span></p>
+                    <p><strong>Last Sync:</strong> <span id="lastSync">2 hours ago</span></p>
+                </div>
+
+                <div class="warning-box">
+                    <h3>⚠️ What happens when you disconnect?</h3>
+                    <ul>
+                        <li><strong>OAuth access will be revoked</strong> - You'll need to reconnect to use the app again</li>
+                        <li><strong>All stored tokens will be deleted</strong> within 30 days</li>
+                        <li><strong>Scheduled syncs will stop</strong> immediately</li>
+                        <li><strong>Your QuickBooks data remains untouched</strong> - No data is deleted from QuickBooks</li>
+                        <li><strong>Reconnection is possible</strong> - You can reconnect anytime</li>
+                    </ul>
+                </div>
+
+                <div class="info-box">
+                    <h4>📋 Data Retention Policy</h4>
+                    <p>After disconnection, we will:</p>
+                    <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                        <li>Delete OAuth tokens within 30 days</li>
+                        <li>Remove all authentication data from our servers</li>
+                        <li>Anonymize usage logs (retained for 90 days for analytics)</li>
+                    </ul>
+                </div>
+
+                <div class="checkbox-group">
+                    <p style="font-weight: 600; margin-bottom: 1rem;">Please confirm you understand:</p>
+                    
+                    <div class="checkbox-item">
+                        <input type="checkbox" id="check1" onchange="validateForm()">
+                        <label for="check1">I understand that all access to my QuickBooks data will be revoked immediately</label>
+                    </div>
+
+                    <div class="checkbox-item">
+                        <input type="checkbox" id="check2" onchange="validateForm()">
+                        <label for="check2">I understand that scheduled syncs will stop and I'll need to reconnect to resume</label>
+                    </div>
+
+                    <div class="checkbox-item">
+                        <input type="checkbox" id="check3" onchange="validateForm()">
+                        <label for="check3">I want to permanently disconnect my QuickBooks account from this app</label>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <a href="/" class="btn btn-secondary">Cancel</a>
+                    <button id="disconnectBtn" class="btn btn-danger" disabled onclick="handleDisconnect()">
+                        Disconnect QuickBooks
+                    </button>
+                </div>
+
+                <div id="errorMessage" class="error"></div>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loadingState" class="loading">
+                <div class="spinner"></div>
+                <h3>Disconnecting QuickBooks...</h3>
+                <p>Please wait while we revoke access and remove your data.</p>
+            </div>
+
+            <!-- Success State -->
+            <div id="successState" class="success">
+                <div class="success-icon">✅</div>
+                <h2>Successfully Disconnected</h2>
+                <p style="margin-bottom: 1.5rem;">Your QuickBooks account has been disconnected. All authentication tokens will be deleted within 30 days.</p>
+                <div class="info-box" style="text-align: left;">
+                    <h4>What's Next?</h4>
+                    <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                        <li>You can reconnect anytime from the home page</li>
+                        <li>Your QuickBooks data remains unchanged</li>
+                        <li>Contact support if you have any questions</li>
+                    </ul>
+                </div>
+                <a href="/" class="btn btn-secondary" style="margin-top: 1rem;">Return to Home</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Form validation
+        function validateForm() {
+            const check1 = document.getElementById('check1').checked;
+            const check2 = document.getElementById('check2').checked;
+            const check3 = document.getElementById('check3').checked;
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            disconnectBtn.disabled = !(check1 && check2 && check3);
+        }
+
+        // Handle disconnect
+        async function handleDisconnect() {
+            const disconnectForm = document.getElementById('disconnectForm');
+            const loadingState = document.getElementById('loadingState');
+            const successState = document.getElementById('successState');
+            const errorMessage = document.getElementById('errorMessage');
+
+            try {
+                // Hide form, show loading
+                disconnectForm.style.display = 'none';
+                loadingState.style.display = 'block';
+                errorMessage.style.display = 'none';
+
+                // Call your API to disconnect
+                const response = await fetch('/api/quickbooks/disconnect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include', // Include cookies for auth
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to disconnect QuickBooks');
+                }
+
+                const data = await response.json();
+                console.log('Disconnect successful:', data);
+
+                // Show success state
+                loadingState.style.display = 'none';
+                successState.style.display = 'block';
+
+                // Optional: Clear any local storage
+                localStorage.removeItem('qb_connected');
+                localStorage.removeItem('qb_company');
+
+            } catch (error) {
+                console.error('Disconnect error:', error);
+
+                // Show error
+                loadingState.style.display = 'none';
+                disconnectForm.style.display = 'block';
+                errorMessage.style.display = 'block';
+                errorMessage.textContent = `Error: ${error.message}. Please try again or contact support.`;
+            }
+        }
+
+        // Load account info on page load
+        window.addEventListener('DOMContentLoaded', async function() {
+            try {
+                // Fetch current connection info from your API
+                const response = await fetch('/api/quickbooks/connection-info', {
+                    credentials: 'include'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Update UI with actual data
+                    if (data.companyName) {
+                        document.getElementById('companyName').textContent = data.companyName;
+                    }
+                    if (data.connectedSince) {
+                        document.getElementById('connectedDate').textContent = 
+                            new Date(data.connectedSince).toLocaleDateString('en-US', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric'
+                            });
+                    }
+                    if (data.lastSync) {
+                        document.getElementById('lastSync').textContent = 
+                            formatTimeSince(new Date(data.lastSync));
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load connection info:', error);
+                // Continue with placeholder data
+            }
+        });
+
+        // Helper function to format time since
+        function formatTimeSince(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            
+            if (seconds < 60) return 'Just now';
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+            const days = Math.floor(hours / 24);
+            return `${days} day${days > 1 ? 's' : ''} ago`;
+        }
+
+        // Prevent accidental navigation
+        window.addEventListener('beforeunload', function(e) {
+            const form = document.getElementById('disconnectForm');
+            if (form.style.display !== 'none') {
+                // Only show warning if form is still visible (not loading/success)
+                const check3 = document.getElementById('check3').checked;
+                if (check3) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                }
+            }
+        });
+    </script>
+</body>
+</html>
