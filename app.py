@@ -1,5 +1,5 @@
 # app.py  (place in project root)
-from flask import Flask, request, render_template, jsonify, redirect
+from flask import Flask, request, render_template, jsonify, redirect, send_from_directory
 import sys
 from pathlib import Path
 import os
@@ -15,9 +15,10 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 # ----------------------------------------------------------------------
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
-# Add src/ to Python path (relative to root app.py)
-sys.path.append(str(Path(__file__).parent / "src"))
-
+# --- ABSOLUTE BASE DIRECTORY ---
+BASE_DIR = Path(__file__).resolve().parent
+sys.path.append(str(BASE_DIR / "src"))
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 # ----------------------------------------------------------------------
 # 2. Import your own modules
 # ----------------------------------------------------------------------
@@ -32,12 +33,12 @@ from src.qb_client import QuickBooksClient
 from src.logger import setup_logger, log_processing_result
 
 # ----------------------------------------------------------------------
-# 3. Flask app + ProxyFix
+# 3. Flask app + ProxyFix + Absolute template/static folders
 # ----------------------------------------------------------------------
 app = Flask(
     __name__,
-    template_folder="templates",
-    static_folder="static"
+    template_folder=str(BASE_DIR / "templates"),
+    static_folder=str(BASE_DIR / "static")
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
@@ -51,10 +52,9 @@ handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)
 logger.addHandler(handler)
 
 # ----------------------------------------------------------------------
-# 5. Core CSV processing
+# 5. Core CSV processing (unchanged logic, just wrapped safely)
 # ----------------------------------------------------------------------
 def process_csv_file(file_path):
-    """Main processing workflow for CSV files from file path"""
     try:
         qb_auth = QuickBooksAuth()
         qb_client = QuickBooksClient(qb_auth)
@@ -67,7 +67,6 @@ def process_csv_file(file_path):
         df = parser.parse_file(file_path)
         logger.info(f"Successfully parsed CSV with {len(df)} rows")
 
-        # Validate required columns
         required_columns = [
             'Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service',
             'Description', 'Total Amount', 'Quantity', 'Unit Cost',
@@ -81,123 +80,99 @@ def process_csv_file(file_path):
         results = []
         grouped = df.groupby('Invoice No.')
 
-        # --- Safe money parser ---
         def parse_money(value):
-                if pd.isna(value):
-                    return Decimal('0.00')
-                # Convert to string, strip, remove commas and any non-numeric except . and -
-                s = str(value).strip()
-                s = ''.join(c for c in s if c in '0123456789.-')
-                if not s or s == '.' or s == '-':
-                    return Decimal('0.00')
-                try:
-                    return Decimal(s)
-                except:
-                    logger.warning(f"Failed to parse money: {value}")
-                    return Decimal('0.00')
+            if pd.isna(value):
+                return Decimal('0.00')
+            s = str(value).strip()
+            s = ''.join(c for c in s if c in '0123456789.-')
+            if not s or s in {'.', '-'}:
+                return Decimal('0.00')
+            try:
+                return Decimal(s)
+            except Exception:
+                logger.warning(f"Failed to parse money: {value}")
+                return Decimal('0.00')
 
-        # --- Line builder: one QB line per CSV row ---
         def calculate_markup_factor(row):
-            """Calculate markup factor from CSV: Total Amount / (Unit Cost × Quantity)"""
             try:
                 qty = Decimal(str(row['Quantity']))
                 unit_cost = parse_money(row['Unit Cost'])
                 total_amount = parse_money(row['Total Amount'])
-
                 if qty <= 0 or unit_cost <= 0 or total_amount <= 0:
                     return Decimal('1.0')
-
                 expected = unit_cost * qty
                 if expected == 0:
                     return Decimal('1.0')
-
                 factor = total_amount / expected
                 return factor.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
             except Exception as e:
                 logger.warning(f"Failed to calculate markup: {e}")
                 return Decimal('1.0')
+
         def build_lines(group, invoice_num, for_invoice=False):
-                lines = []
-                for _, row in group.iterrows():
-                    item_id = product_service.find_or_create_product(row, invoice_num)
-                    logger.info(f"RAW CSV INPUT → Invoice={invoice_num} | Item='{row.get('Description', '')}' | Total Amount='{row.get('Total Amount', 'MISSING')}' | Type={type(row.get('Total Amount'))}")
+            lines = []
+            for _, row in group.iterrows():
+                item_id = product_service.find_or_create_product(row, invoice_num)
+                total_amount_csv = parse_money(row['Total Amount'])
+                qty_csv = Decimal(str(row['Quantity'] or '1'))
+                unit_cost_csv = parse_money(row['Unit Cost'])
 
-                    total_amount_csv = parse_money(row['Total Amount'])
-                    qty_csv = Decimal(str(row['Quantity'] or '1'))
-                    unit_cost_csv = parse_money(row['Unit Cost'])
+                if total_amount_csv <= 0:
+                    logger.warning(f"Skipping zero/negative total: {row['Product / Service']}")
+                    continue
 
-                    if total_amount_csv <= 0:
-                        logger.warning(f"Skipping zero/negative total: {row['Product / Service']}")
-                        continue
+                markup_factor = calculate_markup_factor(row)
+                description = str(row.get('Description', '') or '').strip()
 
-                    # === CALCULATE MARKUP FACTOR FOR LOGGING ===
-                    markup_factor = calculate_markup_factor(row)
+                if for_invoice:
+                    qty_to_send = Decimal('1')
+                    unit_price = total_amount_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    amount = unit_price
+                    desc_parts = [description] if description else []
+                    if qty_csv != 1:
+                        desc_parts.append(f"Qty: {qty_csv}")
+                    full_desc = " | ".join(filter(None, desc_parts))
 
-                    description = str(row.get('Description', '') or '').strip()
+                    line = {
+                        'DetailType': 'SalesItemLineDetail',
+                        'Amount': float(amount),
+                        'SalesItemLineDetail': {
+                            'ItemRef': {'value': str(item_id)},
+                            'Qty': 1.0,
+                            'UnitPrice': float(unit_price),
+                        },
+                        'Description': full_desc
+                    }
+                    logger.info(
+                        f"INVOICE → {row['Product / Service']} | "
+                        f"Qty={qty_csv} | Cost={unit_cost_csv} | CSV Total={total_amount_csv} | "
+                        f"Markup={markup_factor}x | QB: Qty=1, UnitPrice={unit_price}"
+                    )
+                else:
+                    qty_to_send = float(qty_csv) if qty_csv > 0 else 1.0
+                    unit_price = float(unit_cost_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                    amount = float((Decimal(str(qty_to_send)) * unit_cost_csv).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                    line = {
+                        'DetailType': 'SalesItemLineDetail',
+                        'Amount': amount,
+                        'SalesItemLineDetail': {
+                            'ItemRef': {'value': str(item_id)},
+                            'Qty': qty_to_send,
+                            'UnitPrice': unit_price,
+                        },
+                        'Description': description
+                    }
+                    logger.info(
+                        f"SALES RECEIPT → {row['Product / Service']} | "
+                        f"Qty={qty_csv}, UnitPrice={unit_price}, Amount={amount}"
+                    )
+                lines.append(line)
+            return lines
 
-                    if for_invoice:
-                        # === INVOICE: USE CSV TOTAL (WITH MARKUP) ===
-                        qty_to_send = Decimal('1')
-                        unit_price = total_amount_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                        amount = unit_price
-
-                        # Add original qty to description
-                        desc_parts = [description] if description else []
-                        if qty_csv != 1:
-                            desc_parts.append(f"Qty: {qty_csv}")
-                        full_desc = " | ".join(filter(None, desc_parts))
-
-                        line = {
-                            'DetailType': 'SalesItemLineDetail',
-                            'Amount': float(amount),
-                            'SalesItemLineDetail': {
-                                'ItemRef': {'value': str(item_id)},
-                                'Qty': 1.0,
-                                'UnitPrice': float(unit_price),
-                            },
-                            'Description': full_desc
-                        }
-
-                        logger.info(
-                            f"INVOICE → {row['Product / Service']} | "
-                            f"Qty={qty_csv} | Cost={unit_cost_csv} | CSV Total={total_amount_csv} | "
-                            f"Markup={markup_factor}x | "
-                            f"QB: Qty=1, UnitPrice={unit_price}, Amount={amount}"
-                        )
-
-                    else:
-                        # === SALES RECEIPT: NO MARKUP ===
-                        qty_to_send = float(qty_csv) if qty_csv > 0 else 1.0
-                        unit_price = float(unit_cost_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
-                        amount = float((Decimal(str(qty_to_send)) * unit_cost_csv).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
-
-                        line = {
-                            'DetailType': 'SalesItemLineDetail',
-                            'Amount': amount,
-                            'SalesItemLineDetail': {
-                                'ItemRef': {'value': str(item_id)},
-                                'Qty': qty_to_send,
-                                'UnitPrice': unit_price,
-                            },
-                            'Description': description
-                        }
-
-                        logger.info(
-                            f"SALES RECEIPT → {row['Product / Service']} | "
-                            f"Qty={qty_csv}, UnitPrice={unit_price}, Amount={amount}"
-                        )
-
-                    lines.append(line)
-
-                return lines
-
-        # --- Process each invoice group ---
         for invoice_num, group in grouped:
             try:
                 mapper = TransactionMapper()
                 is_insurance = mapper.is_insurance_transaction(group)
-
-                # --- Find or create customer ---
                 if is_insurance:
                     insurance_name = mapper.extract_insurance_name(group)
                     customer_id = customer_service.find_or_create_customer(
@@ -206,31 +181,21 @@ def process_csv_file(file_path):
                         insurance_name=insurance_name
                     )
                 else:
-                    customer_id = customer_service.find_or_create_customer(
-                        group, mapper, customer_type="patient"
-                    )
+                    customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
 
-                # --- Determine transaction type BEFORE building lines ---
                 transaction_type = mapper.determine_transaction_type(group)
 
-                # --- Build lines and send to QuickBooks ---
                 if transaction_type == "invoice":
                     lines = build_lines(group, invoice_num, for_invoice=True)
                     result = invoice_service.create_invoice(group, customer_id, lines)
                     logger.info(f"Created invoice for {invoice_num}")
-
                 elif transaction_type == "sales_receipt":
                     lines = build_lines(group, invoice_num, for_invoice=False)
                     result = receipt_service.create_sales_receipt(group, customer_id, lines)
                     logger.info(f"Created sales receipt for {invoice_num}")
-
                 else:
                     logger.warning(f"Unknown transaction type '{transaction_type}' for {invoice_num}")
-                    results.append({
-                        "invoice": invoice_num,
-                        "status": "error",
-                        "error": f"Unknown transaction type: {transaction_type}"
-                    })
+                    results.append({"invoice": invoice_num, "status": "error", "error": f"Unknown type: {transaction_type}"})
                     continue
 
                 results.append({
@@ -239,14 +204,9 @@ def process_csv_file(file_path):
                     "transaction_id": result.get("Id"),
                     "type": transaction_type
                 })
-
             except Exception as e:
                 logger.error(f"Error processing invoice {invoice_num}: {str(e)}")
-                results.append({
-                    "invoice": invoice_num,
-                    "status": "error",
-                    "error": str(e)
-                })
+                results.append({"invoice": invoice_num, "status": "error", "error": str(e)})
 
         log_processing_result(file_path, results)
         return True, log_stream.getvalue()
@@ -270,11 +230,10 @@ def upload_file():
         return jsonify({'success': False, 'logs': log_stream.getvalue()})
 
     file = request.files['file']
-    if file.filename == '' or not file.filename.lower().endswith('.csv'):
+    if not file.filename or not file.filename.lower().endswith('.csv'):
         logger.error("Invalid file")
         return jsonify({'success': False, 'logs': log_stream.getvalue()})
 
-    # Reset log stream for this request
     log_stream.truncate(0)
     log_stream.seek(0)
 
@@ -283,6 +242,7 @@ def upload_file():
         tmp_path = tmp.name
 
     success, logs = process_csv_file(tmp_path)
+    os.unlink(tmp_path)
     return jsonify({'success': success, 'logs': logs})
 
 @app.route('/login')
@@ -294,21 +254,24 @@ def login():
 @app.route('/callback')
 def callback():
     auth = QuickBooksAuth()
-    tokens = auth.fetch_tokens(request.url)
-    realm_id = auth.get_realm_id()
-    return jsonify({
-        "status": "connected",
-        "realmId": realm_id,
-        "tokens": tokens
-    })
+    try:
+        tokens = auth.fetch_tokens(request.url)
+        realm_id = auth.get_realm_id()
+        return jsonify({"status": "connected", "realmId": realm_id, "tokens": tokens})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 400
 
 # ----------------------------------------------------------------------
-# 7. Vercel entry-point (required for serverless)
+# 7. SPA fallback (optional)
 # ----------------------------------------------------------------------
-# Vercel looks for `app` variable — nothing else needed
+@app.errorhandler(404)
+def not_found(e):
+    if request.path.startswith('/static/'):
+        return "Not found", 404
+    return render_template('index.html'), 200
 
 # ----------------------------------------------------------------------
-# 8. Local dev entry-point
+# 8. Local dev
 # ----------------------------------------------------------------------
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)), debug=True)
