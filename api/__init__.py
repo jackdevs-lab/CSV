@@ -2,6 +2,8 @@
 from flask import Flask
 import sys
 from pathlib import Path
+from flask import Flask, request
+
 from flask import Flask, render_template
 # Fix path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -15,7 +17,13 @@ def disconnect():
 @app.route('/eula')
 def eula():
     return render_template('eula.html')
-
+@app.route('/callback')
+def callback():
+    code = request.args.get('code')
+    realm_id = request.args.get('realmId')
+    if code:
+        return f"<h1>SUCCESS!</h1><p>Code: {code}</p><p>Realm ID: {realm_id}</p>"
+    return "Error: No code", 400
 @app.route('/privacy')
 def privacy():
     return render_template('privacy.html')
