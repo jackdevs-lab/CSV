@@ -53,6 +53,52 @@
             padding: 40px;
         }
 
+        /* CONNECT BUTTON STYLES */
+        .connect-section {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 12px;
+        }
+
+        .connect-section h3 {
+            color: #166534;
+            margin-bottom: 12px;
+            font-size: 1.2rem;
+        }
+
+        .connect-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: #16a34a;
+            color: white;
+            padding: 14px 32px;
+            border-radius: 8px;
+            font-weight: 600;
+            text-decoration: none;
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+        }
+
+        .connect-btn:hover {
+            background: #15803d;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(22, 163, 74, 0.4);
+        }
+
+        .connect-btn:active {
+            transform: translateY(0);
+        }
+
+        .connect-btn .icon {
+            width: 24px;
+            height: 24px;
+        }
+
         .upload-section {
             background: #f8fafc;
             border: 2px dashed #cbd5e1;
@@ -261,9 +307,25 @@
         </div>
 
         <div class="content">
+
+            <!-- CONNECT TO QUICKBOOKS BUTTON -->
+            <div class="connect-section">
+                <h3>Connect Your QuickBooks Account</h3>
+                <a href="/login" class="connect-btn">
+                    <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                    Connect to QuickBooks
+                </a>
+                <p style="margin-top: 10px; font-size: 0.9rem; color: #166534;">
+                    Secure one-time connection • Required to create invoices
+                </p>
+            </div>
+
+            <!-- UPLOAD FORM -->
             <form id="upload-form">
                 <div class="upload-section" id="upload-area">
-                    <div class="upload-icon">📊</div>
+                    <div class="upload-icon">Chart</div>
                     <h3>Upload CSV File</h3>
                     <p>Drag and drop your file here or click to browse</p>
                     <input type="file" id="csv-file" name="file" accept=".csv">
@@ -273,10 +335,10 @@
                 <div class="file-info" id="file-info">
                     <div class="file-info-content">
                         <span class="file-name">
-                            <span>📄</span>
+                            <span>File</span>
                             <span id="file-name-display"></span>
                         </span>
-                        <button type="button" class="remove-file" id="remove-file">✕</button>
+                        <button type="button" class="remove-file" id="remove-file">Remove</button>
                     </div>
                 </div>
 
@@ -287,7 +349,7 @@
 
             <div class="log-section">
                 <h3>
-                    <span>📋</span>
+                    <span>Log</span>
                     Processing Logs
                     <span class="status-badge" id="status-badge" style="margin-left: auto; display: none;"></span>
                 </h3>
