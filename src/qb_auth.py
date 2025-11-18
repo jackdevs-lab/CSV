@@ -77,57 +77,74 @@ class QuickBooksAuth:
         self._lock = False  # Simple lock to prevent parallel refresh
 
     def _refresh_token_if_needed(self):
-        """Refresh token if expired or near expiry (5 min buffer)"""
-        now = time.time()
-        expires_at = self._tokens.get("expires_at", 0)
+            """Refresh token if expired or near expiry (5 min buffer) — 100% safe from NoneType errors"""
+            now = time.time()
 
-        if expires_at > now + 300:  # More than 5 min left
-            return
+            # SAFELY get expires_at — this is the root of all your crashes
+            raw_expires_at = self._tokens.get("expires_at")
 
-        if self._lock:
-            while self._lock:
-                time.sleep(0.1)  # Wait for other refresh to finish
-            return
+            # If expires_at is None, missing, or not a number → treat as expired
+            try:
+                expires_at = float(raw_expires_at) if raw_expires_at is not None else 0
+            except (TypeError, ValueError):
+                expires_at = 0  # Force refresh on any corruption
 
-        self._lock = True
-        try:
-            refresh_token = self._tokens.get("refresh_token")
-            if not refresh_token:
-                raise ValueError("No refresh token available — re-authenticate at /login")
+            # If token has >5 minutes left → do nothing
+            if expires_at > now + 300:
+                return
 
-            print("Refreshing QuickBooks access token...")
-            response = requests.post(
-                self.token_url,
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": "Basic " + requests.auth._basic_auth_str(
-                        self.client_id, self.client_secret
-                    ),
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                },
-            )
-            response.raise_for_status()
-            new_tokens = response.json()
+            # --- Token is expired or near expiry → refresh ---
+            if self._lock:
+                # Another request is already refreshing — wait for it
+                while self._lock:
+                    time.sleep(0.1)
+                return
 
-            # Update tokens
-            self._tokens.update({
-                "access_token": new_tokens["access_token"],
-                "refresh_token": new_tokens.get("refresh_token", refresh_token),
-                "expires_at": time.time() + new_tokens["expires_in"] - 60,
-            })
+            self._lock = True
+            try:
+                refresh_token = self._tokens.get("refresh_token")
+                if not refresh_token:
+                    raise ValueError("No refresh token available — re-authenticate at /login")
 
-            save_tokens(self._tokens.copy())
-            print("Token refreshed successfully")
+                logger.info("Refreshing QuickBooks access token...")  # Use logger instead of print
+                response = requests.post(
+                    self.token_url,
+                    headers={
+                        "Accept": "application/json",
+                        "Authorization": "Basic " + requests.auth._basic_auth_str(
+                            self.client_id, self.client_secret
+                        ),
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token,
+                    },
+                    timeout=30,
+                )
+                response.raise_for_status()
+                new_tokens = response.json()
 
-        except Exception as e:
-            print(f"Failed to refresh token: {e}")
-            raise
-        finally:
-            self._lock = False
+                # Ensure expires_in exists and is valid
+                expires_in = new_tokens.get("expires_in", 3600)
+                if not isinstance(expires_in, (int, float)):
+                    expires_in = 3600
+
+                # Update tokens with guaranteed valid expires_at
+                self._tokens.update({
+                    "access_token": new_tokens["access_token"],
+                    "refresh_token": new_tokens.get("refresh_token", refresh_token),
+                    "expires_at": now + expires_in - 60,  # 1 minute safety buffer
+                })
+
+                save_tokens(self._tokens.copy())
+                logger.info("QuickBooks access token refreshed successfully")
+
+            except Exception as e:
+                logger.error(f"Failed to refresh QuickBooks token: {e}", exc_info=True)
+                raise
+            finally:
+                self._lock = False
 
     def get_valid_access_token(self):
         """Main method — always returns a valid access token"""
