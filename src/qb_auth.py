@@ -4,6 +4,8 @@ import json
 import time
 import requests
 from dotenv import load_dotenv
+from src.logger import setup_logger
+logger = setup_logger(__name__)
 
 load_dotenv()
 
