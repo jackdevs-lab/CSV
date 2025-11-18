@@ -24,17 +24,14 @@ class QuickBooksClient:
             logger.error("❌ Missing realm ID. Add QB_REALM_ID to .env or ensure tokens contain it.")
             raise ValueError("Missing QuickBooks realm ID")
 
+    # In src/qb_client.py → _get_headers()
     def _get_headers(self):
-        """Get headers for API requests"""
-        access_token = self.auth.get_access_token()
-        if not access_token:
-            raise ValueError("No access token found — check your .env or re-authenticate.")
+        access_token = self.auth.get_valid_access_token()  # ← This is the key change
         return {
             'Authorization': f'Bearer {access_token}',
             'Accept': 'application/json',
             'Content-Type': 'application/json'
         }
-
     def _make_request(self, method, endpoint, data=None):
         """Make API request to QuickBooks"""
         url = f"{self.base_url}/v3/company/{self.realm_id}/{endpoint}"
