@@ -7,158 +7,138 @@ from src.logger import setup_logger
 logger = setup_logger(__name__)
 
 class QuickBooksClient:
-    """Wrapper for QuickBooks Online REST API"""
+    """Safe & robust wrapper for QuickBooks Online v3 API"""
 
     def __init__(self, auth):
         self.auth = auth
-        # Use .env values directly (already loaded by qb_auth)
         self.base_url = {
             "sandbox": "https://sandbox-quickbooks.api.intuit.com",
             "production": "https://quickbooks.api.intuit.com"
-        }.get(os.getenv("QB_ENVIRONMENT", "sandbox"))
+        }.get(os.getenv("QB_ENVIRONMENT", "sandbox").lower())
 
-        # Prefer realm_id from auth (from .env tokens or blob)
         self.realm_id = self.auth.get_realm_id() or os.getenv("QB_REALM_ID")
-
         if not self.realm_id:
-            logger.error("❌ Missing realm ID. Add QB_REALM_ID to .env or ensure tokens contain it.")
             raise ValueError("Missing QuickBooks realm ID")
 
-    # In src/qb_client.py → _get_headers()
+        logger.info(f"QuickBooksClient initialized | Realm ID: {self.realm_id} | Env: {os.getenv('QB_ENVIRONMENT')}")
+
     def _get_headers(self):
-        access_token = self.auth.get_valid_access_token()  # ← This is the key change
+        access_token = self.auth.get_valid_access_token()
         return {
             'Authorization': f'Bearer {access_token}',
             'Accept': 'application/json',
             'Content-Type': 'application/json'
         }
-    def _make_request(self, method, endpoint, data=None):
-        """Make API request to QuickBooks"""
+
+    def _make_request(self, method, endpoint, data=None, params=None):
         url = f"{self.base_url}/v3/company/{self.realm_id}/{endpoint}"
         headers = self._get_headers()
 
         try:
-            response = requests.request(method, url, headers=headers, json=data)
-            logger.debug(f"QB REQUEST → {method} {url}\nData: {json.dumps(data, indent=2) if data else 'No body'}")
+            response = requests.request(method, url, headers=headers, json=data, params=params, timeout=30)
+            logger.debug(f"QB → {method} {url} | Body: {json.dumps(data) if data else 'None'}")
             response.raise_for_status()
-
-            if response.headers.get('Content-Type', '').startswith('application/json'):
-                return response.json()
-            else:
-                logger.warning(f"⚠️ Non-JSON response: {response.text}")
-                return {"response_text": response.text}
-
+            return response.json() if response.content else {}
         except requests.exceptions.HTTPError as e:
-            logger.error(f"❌ HTTP Error: {e.response.status_code} - {e.response.text}")
+            error_body = e.response.text
+            logger.error(f"QuickBooks HTTP {e.response.status_code}: {error_body}")
             raise
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Network/Request error: {e}")
+        except Exception as e:
+            logger.error(f"Request failed: {str(e)}")
             raise
 
-    # --- Business Object Methods --- #
+    # ———————— CUSTOMER METHODS ———————— #
+    def find_customer_by_name(self, name: str):
+        """Safely find customer by DisplayName — NEVER returns malformed objects"""
+        if not name or not name.strip():
+            return None
 
-    def set_realm_id(self, realm_id):
-        """Manually override company realm ID"""
-        self.realm_id = str(realm_id).strip()
-        logger.info(f"✅ Realm ID set to {self.realm_id}")
+        name = name.strip()
+        escaped = name.replace("'", "''")
+
+        # 1. Exact match (fast + safe)
+        query = f"SELECT * FROM Customer WHERE DisplayName = '{escaped}' AND Active IN (true, false)"
+        try:
+            data = self._query_safe(query)
+            customers = data.get('QueryResponse', {}).get('Customer', [])
+
+            for cust in customers:
+                if cust.get('DisplayName') == name and cust.get('Id'):
+                    return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
+        except Exception as e:
+            logger.warning(f"Exact customer search failed for '{name}': {e}")
+
+        # 2. Fallback: partial match (only if exact failed)
+        query = f"SELECT * FROM Customer WHERE DisplayName LIKE '%{escaped}%' AND Active IN (true, false) MAXRESULTS 5"
+        try:
+            data = self._query_safe(query)
+            candidates = data.get('QueryResponse', {}).get('Customer', [])
+            for cust in candidates:
+                if name.lower() in (cust.get('DisplayName') or '').lower() and cust.get('Id'):
+                    logger.info(f"Customer partial match: '{name}' → '{cust['DisplayName']}' (ID: {cust['Id']})")
+                    return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
+        except Exception as e:
+            logger.warning(f"Partial customer search failed: {e}")
+
+        logger.info(f"Customer not found: '{name}'")
+        return None
 
     def create_customer(self, customer_data):
-        return self._make_request('POST', 'customer', customer_data)
+        """Create customer with safe response handling"""
+        resp = self._make_request('POST', 'customer', customer_data)
+        customer = resp.get('Customer', {})
+        if not customer.get('Id'):
+            raise ValueError("Customer created but no Id returned")
+        return customer
 
-    def query_customers(self, query):
-        encoded_query = quote(query, safe='')
-        return self._make_request('GET', f'query?query={encoded_query}')
+    # ———————— ITEM METHODS ———————— #
+    def find_item_by_name(self, name: str):
+        if not name:
+            return None
+        escaped = name.replace("'", "''")
+        query = f"SELECT * FROM Item WHERE Name = '{escaped}' AND Active = true"
+        data = self._query_safe(query)
+        items = data.get('QueryResponse', {}).get('Item', [])
+        return items[0] if items else None
 
-    def find_customer_by_name(self, name):
-        """Find customer by display name"""
-        escaped = name.replace("'", "''").strip()
-        query = f"select * from Customer where DisplayName = '{escaped}'"
+    # ———————— PAYMENT METHOD ———————— #
+    def find_payment_method_by_name(self, name: str):
+        escaped = name.replace("'", "''")
+        query = f"SELECT * FROM PaymentMethod WHERE Name = '{escaped}'"
+        data = self._query_safe(query)
+        methods = data.get('QueryResponse', {}).get('PaymentMethod', [])
+        return methods[0]['Id'] if methods else None
+
+    def create_payment_method(self, name: str):
+        sanitized = ' '.join(name.split())[:31]
+        data = {"Name": sanitized, "Type": "NON_CREDIT_CARD"}
         try:
-            resp = self.query_customers(query)
-            customers = resp.get('QueryResponse', {}).get('Customer', [])
-            if customers:
-                logger.debug(f"Found exact match for {name}: {customers[0]['Id']}")
-                return customers[0]
+            resp = self._make_request('POST', 'paymentmethod', data)
+            return resp["PaymentMethod"]["Id"]
+        except requests.exceptions.HTTPError as e:
+            if "Duplicate" in e.response.text:
+                return self.find_payment_method_by_name(sanitized)
+            raise
 
-            # fallback: partial match
-            query_like = f"select * from Customer where DisplayName LIKE '%{escaped}%'"
-            resp = self.query_customers(query_like)
-            customers = resp.get('QueryResponse', {}).get('Customer', [])
-            if customers:
-                logger.info(f"Found partial match for {name}: {customers[0]['Id']}")
-                return customers[0]
-
-            return None
-        except Exception as e:
-            logger.error(f"Error finding customer '{name}': {e}")
-            return None
-
-    def create_item(self, item_data):
-        return self._make_request('POST', 'item', item_data)
-
-    def query_items(self, query):
-        encoded_query = quote(query, safe='')
-        return self._make_request('GET', f'query?query={encoded_query}')
-
-    def find_item_by_name(self, name):
-        sanitized = ''.join(c if c.isalnum() or c in ' .-_' else ' ' for c in name)
-        sanitized = ' '.join(sanitized.split()).title()[:100]
-        escaped = sanitized.replace("'", "''")
-
-        query = f"select * from Item where Name = '{escaped}'"
-        try:
-            resp = self.query_items(query)
-            items = resp.get('QueryResponse', {}).get('Item', [])
-            if items:
-                return items[0]
-            # fallback
-            query_like = f"select * from Item where Name LIKE '%{escaped}%'"
-            resp = self.query_items(query_like)
-            items = resp.get('QueryResponse', {}).get('Item', [])
-            return items[0] if items else None
-        except Exception as e:
-            logger.error(f"Error finding item '{name}': {e}")
-            return None
-
+    # ———————— INVOICE / SALES RECEIPT ———————— #
     def create_invoice(self, invoice_data):
         return self._make_request('POST', 'invoice', invoice_data)
 
     def create_sales_receipt(self, receipt_data):
         return self._make_request('POST', 'salesreceipt', receipt_data)
 
-    def find_payment_method_by_name(self, name):
-        sanitized = ''.join(c if c.isalnum() or c in ' .-_' else ' ' for c in name)
-        sanitized = ' '.join(sanitized.split()).title()[:31]
-        escaped = sanitized.replace("'", "''")
-        query = f"select * from PaymentMethod where Name = '{escaped}'"
-
+    # ———————— SAFE QUERY HELPER (THIS IS THE KEY FIX) ———————— #
+    def _query_safe(self, sql: str):
+        """Execute SQL query with full error handling and malformed object protection"""
+        encoded = quote(sql, safe='')
         try:
-            resp = self._make_request('GET', f'query?query={query}')
-            methods = resp.get('QueryResponse', {}).get('PaymentMethod', [])
-            if methods:
-                return methods[0]['Id']
-            return None
+            resp = self._make_request('GET', f'query', params={'query': sql})
+            # Intuit sometimes returns empty body → {}
+            return resp.get('QueryResponse', {}) if resp else {}
         except Exception as e:
-            logger.error(f"Error finding payment method '{name}': {e}")
-            return None
+            logger.error(f"Query failed: {sql}\nError: {e}")
+            return {'QueryResponse': {}}
 
-    def create_payment_method(self, name):
-        sanitized = ''.join(c if c.isalnum() or c in ' .-_' else ' ' for c in name)
-        sanitized = ' '.join(sanitized.split()).title()[:31]
-        type_map = {
-            'cash': 'NON_CREDIT_CARD',
-            'check': 'NON_CREDIT_CARD',
-            'credit card': 'CREDIT_CARD',
-            'debit card': 'NON_CREDIT_CARD',
-            'mpesa': 'NON_CREDIT_CARD'
-        }
-        method_type = type_map.get(name.lower(), 'NON_CREDIT_CARD')
-        data = {"Name": sanitized, "Type": method_type}
-
-        try:
-            resp = self._make_request('POST', 'paymentmethod', data)
-            return resp["PaymentMethod"]["Id"]
-        except requests.exceptions.HTTPError as e:
-            if '"code":"6240"' in str(e):  # Duplicate
-                return self.find_payment_method_by_name(sanitized)
-            raise
+    # Optional: expose raw query for advanced use
+    def query(self, sql: str):
+        return self._query_safe(sql)
