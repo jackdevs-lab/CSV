@@ -256,10 +256,33 @@ def callback():
     auth = QuickBooksAuth()
     try:
         tokens = auth.fetch_tokens(request.url)
-        realm_id = auth.get_realm_id()
-        return jsonify({"status": "connected", "realmId": realm_id, "tokens": tokens})
+        new_refresh_token = tokens['refresh_token']
+        realm_id = auth.get_realm_id() or "UNKNOWN"
+
+        html = f"""
+        <div style="font-family: system-ui, sans-serif; padding: 50px; text-align: center; background: #f0fdf4; min-height: 100vh;">
+            <h1 style="color: #16a34a;">QuickBooks Connected Successfully Connected!</h1>
+            <h2>COPY THESE TWO LINES IMMEDIATELY</h2>
+            <pre style="background:#000;color:#0f0;padding:40px;font-size:24px;border-radius:12px;display:inline-block;">
+QB_REFRESH_TOKEN={new_refresh_token}
+
+QB_REALM_ID={realm_id}
+            </pre>
+            <p style="font-size:20px;margin-top:30px;">
+                → Go to Vercel Dashboard → Your Project → Settings → Environment Variables<br>
+                → Paste the two lines above (Production environment)<br>
+                → Save → Wait 10 seconds → Upload any CSV → IT WILL WORK
+            </p>
+            <script>
+                navigator.clipboard.writeText("QB_REFRESH_TOKEN={new_refresh_token}\\nQB_REALM_ID={realm_id}");
+                alert("Copied to clipboard!");
+            </script>
+        </div>
+        """
+        return html
+
     except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 400
+        return f"<h2 style='color:red;'>Connection failed: {str(e)}</h2><p>Try again or contact support.</p>", 500
 
 # ----------------------------------------------------------------------
 # 7. SPA fallback (optional)
