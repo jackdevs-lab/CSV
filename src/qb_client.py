@@ -6,8 +6,36 @@ from src.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
+class SafeQBDecoder(json.JSONDecoder):
+    """Custom JSON decoder that converts null → 0 for known numeric fields Intuit sometimes returns as null"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(object_hook=self.object_hook, *args, **kwargs)
+
+    def object_hook(self, obj):
+        if not isinstance(obj, dict):
+            return obj
+
+        # Fix known numeric fields that Intuit sometimes returns as null
+        numeric_fields = {
+            'Id', 'SyncToken', 'Balance', 'BalanceWithJobs', 'TotalAmt',
+            'LineNum', 'Amount', 'Qty', 'UnitPrice', 'Taxable', 'TxnDate'
+        }
+
+        for key in obj:
+            value = obj[key]
+            if value is None and key in numeric_fields:
+                obj[key] = 0
+            elif isinstance(value, dict):
+                obj[key] = self.object_hook(value)
+            elif isinstance(value, list):
+                obj[key] = [self.object_hook(item) if isinstance(item, dict) else item for item in value]
+        return obj
+
+
 class QuickBooksClient:
-    """Safe & robust wrapper for QuickBooks Online v3 API"""
+    """Safe & robust wrapper for QuickBooks Online v3 API — immune to None > float errors"""
 
     def __init__(self, auth):
         self.auth = auth
@@ -35,56 +63,56 @@ class QuickBooksClient:
         headers = self._get_headers()
 
         try:
-            response = requests.request(method, url, headers=headers, json=data, params=params, timeout=30)
-            logger.debug(f"QB → {method} {url} | Body: {json.dumps(data) if data else 'None'}")
+            response = requests.request(
+                method, url, headers=headers, json=data, params=params, timeout=30
+            )
+            logger.debug(f"QB → {method} {url}")
             response.raise_for_status()
-            return response.json() if response.content else {}
+
+            if not response.content:
+                return {}
+
+            # THIS IS THE CRITICAL FIX: use our safe decoder
+            return json.loads(response.content, cls=SafeQBDecoder)
+
         except requests.exceptions.HTTPError as e:
             error_body = e.response.text
             logger.error(f"QuickBooks HTTP {e.response.status_code}: {error_body}")
             raise
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e} | Response: {response.text[:500]}")
+            return {}
         except Exception as e:
             logger.error(f"Request failed: {str(e)}")
             raise
 
     # ———————— CUSTOMER METHODS ———————— #
     def find_customer_by_name(self, name: str):
-        """Safely find customer by DisplayName — NEVER returns malformed objects"""
         if not name or not name.strip():
             return None
 
         name = name.strip()
         escaped = name.replace("'", "''")
 
-        # 1. Exact match (fast + safe)
-        query = f"SELECT * FROM Customer WHERE DisplayName = '{escaped}' AND Active IN (true, false)"
-        try:
-            data = self._query_safe(query)
-            customers = data.get('QueryResponse', {}).get('Customer', [])
+        # Exact match
+        query = f"SELECT * FROM Customer WHERE DisplayName = '{escaped}'"
+        data = self._query_safe(query)
+        for cust in data.get('QueryResponse', {}).get('Customer', []):
+            if cust.get('DisplayName') == name and cust.get('Id', 0) != 0:
+                return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
 
-            for cust in customers:
-                if cust.get('DisplayName') == name and cust.get('Id'):
-                    return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
-        except Exception as e:
-            logger.warning(f"Exact customer search failed for '{name}': {e}")
-
-        # 2. Fallback: partial match (only if exact failed)
-        query = f"SELECT * FROM Customer WHERE DisplayName LIKE '%{escaped}%' AND Active IN (true, false) MAXRESULTS 5"
-        try:
-            data = self._query_safe(query)
-            candidates = data.get('QueryResponse', {}).get('Customer', [])
-            for cust in candidates:
-                if name.lower() in (cust.get('DisplayName') or '').lower() and cust.get('Id'):
-                    logger.info(f"Customer partial match: '{name}' → '{cust['DisplayName']}' (ID: {cust['Id']})")
-                    return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
-        except Exception as e:
-            logger.warning(f"Partial customer search failed: {e}")
+        # Partial fallback
+        query = f"SELECT * FROM Customer WHERE DisplayName LIKE '%{escaped}%' MAXRESULTS 10"
+        data = self._query_safe(query)
+        for cust in data.get('QueryResponse', {}).get('Customer', []):
+            if name.lower() in (cust.get('DisplayName') or '').lower() and cust.get('Id', 0) != 0:
+                logger.info(f"Partial match: '{name}' → '{cust.get('DisplayName')}' (ID: {cust['Id']})")
+                return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
 
         logger.info(f"Customer not found: '{name}'")
         return None
 
     def create_customer(self, customer_data):
-        """Create customer with safe response handling"""
         resp = self._make_request('POST', 'customer', customer_data)
         customer = resp.get('Customer', {})
         if not customer.get('Id'):
@@ -127,18 +155,14 @@ class QuickBooksClient:
     def create_sales_receipt(self, receipt_data):
         return self._make_request('POST', 'salesreceipt', receipt_data)
 
-    # ———————— SAFE QUERY HELPER (THIS IS THE KEY FIX) ———————— #
+    # ———————— SAFE QUERY HELPER ———————— #
     def _query_safe(self, sql: str):
-        """Execute SQL query with full error handling and malformed object protection"""
-        encoded = quote(sql, safe='')
         try:
-            resp = self._make_request('GET', f'query', params={'query': sql})
-            # Intuit sometimes returns empty body → {}
-            return resp.get('QueryResponse', {}) if resp else {}
+            resp = self._make_request('GET', 'query', params={'query': sql})
+            return resp.get('QueryResponse', {}) or {}
         except Exception as e:
-            logger.error(f"Query failed: {sql}\nError: {e}")
+            logger.error(f"QB Query failed: {sql} | Error: {e}", exc_info=True)
             return {'QueryResponse': {}}
 
-    # Optional: expose raw query for advanced use
     def query(self, sql: str):
         return self._query_safe(sql)
