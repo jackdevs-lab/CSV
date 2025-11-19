@@ -7,6 +7,7 @@ import logging
 from io import StringIO
 import pandas as pd
 import tempfile
+import time
 from decimal import Decimal, ROUND_HALF_UP
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -182,7 +183,7 @@ def process_csv_file(file_path):
                     )
                 else:
                     customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
-
+                    time.sleep(0.95)
                 transaction_type = mapper.determine_transaction_type(group)
 
                 if transaction_type == "invoice":
