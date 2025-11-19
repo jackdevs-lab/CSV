@@ -50,20 +50,25 @@ class ReceiptService:
         pm_lower = payment_method.lower().strip()
         if pm_lower in self.payment_method_ids:
             return self.payment_method_ids[pm_lower]
-        
+
         # Map common methods
         name_map = {
             'cash': 'Cash',
-            'check': 'Check',
+            'cheque': 'Cheque',
             'credit card': 'Credit Card',
             'debit card': 'Debit Card',
-            'mpesa': 'MPESA'
+            'mpesa': 'MPESA',
+            'visa': 'Visa',
         }
-        qb_name = name_map.get(pm_lower, payment_method.title())  # Default to title case
-        
+        qb_name = name_map.get(pm_lower, payment_method.title())
+
         method_id = self.qb_client.find_payment_method_by_name(qb_name)
         if not method_id:
             method_id = self.qb_client.create_payment_method(qb_name)
-        
+
+        if not method_id:
+            # Fail fast instead of returning None
+            raise ValueError(f"Payment method '{qb_name}' not found or created in QuickBooks")
+
         self.payment_method_ids[pm_lower] = method_id
-        return method_id
+        return str(method_id)  # always return a string ID
