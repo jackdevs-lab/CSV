@@ -27,19 +27,32 @@ class CustomerService:
             customer_name = ' '.join(customer_name.split()).title()
 
         # 2. FIRST: Always try to find by DisplayName — THIS IS THE SOURCE OF TRUTH
-        def get_customer_id_by_name(name: str) -> str | None:
-            escaped = name.replace("'", "''")
-            query = f"SELECT Id FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 1"
-            try:
-                data = self.qb_client._query_safe(query)
+            def get_customer_id_by_name(name: str) -> str | None:
+            # MAKE IT BULLETPROOF — trim + case insensitive + CONTAINS fallback
+                name = name.strip()
+                escaped = name.replace("'", "''")
+
+                # 1. Try exact match (properly escaped)
+                query1 = f"SELECT Id FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 1"
+                data = self.qb_client._query_safe(query1)
                 customers = data.get('QueryResponse', {}).get('Customer', [])
                 if customers:
                     cid = str(customers[0]['Id'])
-                    logger.info(f"Customer found: '{name}' → ID {cid}")
+                    logger.info(f"Customer found (exact): '{name}' → ID {cid}")
                     return cid
-            except Exception as e:
-                logger.warning(f"Query failed for customer '{name}': {e}")
-            return None
+
+                # 2. Try case-insensitive CONTAINS fallback
+                query2 = f"SELECT Id FROM Customer WHERE CONTAINS(DisplayName, '{escaped}') MAXRESULTS 5"
+                data = self.qb_client._query_safe(query2)
+                customers = data.get('QueryResponse', {}).get('Customer', [])
+                for cust in customers:
+                    if name.strip().lower() == cust.get('DisplayName', '').strip().lower():
+                        cid = str(cust['Id'])
+                        logger.info(f"Customer found (fuzzy match): '{name}' → '{cust.get('DisplayName')}' → ID {cid}")
+                        return cid
+
+                logger.info(f"Customer truly not found: '{name}'")
+                return None
 
         existing_id = get_customer_id_by_name(customer_name)
         if existing_id:
