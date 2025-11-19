@@ -75,15 +75,26 @@ class ProductService:
                 return new_item_id
 
             except requests.exceptions.HTTPError as e:
-                error_text = str(getattr(e.response, "text", str(e)))
+                error_text = str(getattr(e.response, "text", ""))
 
+                # THIS IS THE MAGIC LINE — EXTRACT ID FROM DUPLICATE ERROR
+                if "Id=" in error_text:
+                    import re
+                    match = re.search(r'Id=(\d+)', error_text)
+                    if match:
+                        existing_id = match.group(1)
+                        logger.info(f"Duplicate item detected → using existing QB ID {existing_id} for '{sanitized_name}'")
+                        self.item_cache[sanitized_name] = existing_id
+                        return existing_id
+
+                # Only fall back to retry if we couldn't extract ID
                 if '"code":"6240"' in error_text:
-                    logger.warning(f"Duplicate detected for '{service_name}' (sanitized: {sanitized_name}). Retrying lookup...")
-                    item_id = self._retry_find_existing_item(service_name, invoice_id, max_retries=15, delay=3)
+                    logger.warning(f"Duplicate detected for '{sanitized_name}' but no ID in error. Falling back to retry lookup...")
+                    item_id = self._retry_find_existing_item(service_name, invoice_id, max_retries=5, delay=1)
                     self.item_cache[sanitized_name] = item_id
                     return item_id
 
-                logger.error(f"HTTP error while creating item '{service_name}': {error_text}")
+                logger.error(f"Item creation failed: {error_text}")
                 raise
 
             except Exception as e:
