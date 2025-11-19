@@ -61,11 +61,9 @@ class QuickBooksAuth:
                 self.token_url,
                 headers={
                     "Accept": "application/json",
-                    "Authorization": "Basic " + requests.auth._basic_auth_str(
-                        self.client_id, self.client_secret
-                    ),
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
+                auth=(self.client_id, self.client_secret),  # ← THIS IS THE CORRECT WAY
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": self._tokens["refresh_token"],
