@@ -96,13 +96,26 @@ class QuickBooksClient:
     )
 
     def create_customer(self, customer_data):
+        """
+        Create a customer in QuickBooks.
+        Returns the full JSON response (dict) with Customer object on success.
+        Raises RuntimeError with message on validation fault.
+        """
         response = self._make_request('POST', 'customer', customer_data)
-        # DO NOT raise_for_status here — let caller handle Fault
-        json_resp = response.json()
+        
+        # response is already a dict because _make_request returns .json()
+        # So DO NOT call .json() again!
+        json_resp = response  # ← THIS IS THE FIX
+
         if "Fault" in json_resp:
-            error_msg = json_resp["Fault"]["Error"][0]["Detail"]
-            raise RuntimeError(f"QuickBooks rejected customer: {error_msg}")
-        return json_resp
+            error_detail = json_resp["Fault"]["Error"][0].get("Detail", "Unknown error")
+            error_code = json_resp["Fault"]["Error"][0].get("code", "")
+            raise RuntimeError(f"QuickBooks rejected customer creation: {error_detail} (Code: {error_code})")
+
+        if "Customer" not in json_resp:
+            raise RuntimeError(f"Customer creation succeeded but no Customer object returned: {json_resp}")
+
+        return json_resp  # ← returns full dict with "Customer": { ... }
 
     # ———————— ITEM METHODS ———————— #
     def find_item_by_name(self, name: str):

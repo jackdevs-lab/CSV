@@ -33,64 +33,47 @@ class CustomerService:
         payload = {
             "DisplayName": full_display_name,
             "PrimaryEmailAddr": {"Address": f"{safe_email}@example.com"},
-            "PrimaryPhone": {"FreeFormNumber": "555-0123"},
-            "BillAddr": {                     # ← THIS IS REQUIRED IN MOST COMPANIES
+            "PrimaryPhone": {"FreeFormNumber": "0712345678"},
+            "BillAddr": {
                 "Line1": "N/A",
                 "City": "Nairobi",
                 "Country": "Kenya",
-                "CountrySubDivisionCode": "KE-110"
+                "CountrySubDivisionCode": "KE-110",
+                "PostalCode": "00100"
             },
-            "Taxable": False,                 
+            "Taxable": False
         }
 
         if customer_type == "insurance":
             payload["CompanyName"] = full_display_name
         else:
-            payload["GivenName"] = patient_name
+            payload["GivenName"] = patient_name.split()[0] if ' ' in patient_name else patient_name
 
+        # Try up to 3 times (handles transient issues + duplicate recovery)
         for attempt in range(3):
             try:
                 resp = self.qb_client.create_customer(payload)
-                
-                # SUCCESS RESPONSE — now it's safe
-                if "Customer" in resp:
-                    new_id = str(resp["Customer"]["Id"])
-                    logger.info(f"Created customer '{full_display_name}' → QB ID {new_id}")
-                    time.sleep(1)  # let QBO index it
-                    return new_id
-                else:
-                    # If no Customer key → it was a fault
-                    fault = resp.get("Fault", {})
-                    error_detail = fault.get("Error", [{}])[0].get("Detail", "Unknown error")
-                    logger.error(f"QB rejected customer creation: {error_detail}")
-                    if "Duplicate" in resp:
-                        # Try to recover from duplicate
-                        time.sleep(2)
-                        return self.get_customer_id_by_name(full_display_name)
-                    raise RuntimeError(f"Customer creation failed: {error_detail}")
+                new_id = str(resp["Customer"]["Id"])
+                logger.info(f"Created customer '{full_display_name}' → QB ID {new_id}")
+                time.sleep(1)  # Let QBO index it
+                return new_id
 
-            except requests.exceptions.HTTPError as e:
-                if e.response is not None:
-                    try:
-                        error_json = e.response.json()
-                        if "Duplicate" in str(error_json):
-                            logger.warning("Duplicate detected, retrying lookup...")
-                            time.sleep(2)
-                            return self.get_customer_id_by_name(full_display_name)
-                    except:
-                        pass
-                logger.error(f"HTTP error creating customer: {e}")
-            logger.error(f"HTTP error creating customer: {e}")
-            time.sleep(2)
+            except RuntimeError as e:
+                error_msg = str(e)
+                if "Duplicate" in error_msg or "6240" in error_msg:
+                    logger.info(f"Customer already exists: '{full_display_name}' — recovering ID")
+                    time.sleep(2)
+                    return self.get_customer_id_by_name(full_display_name)
+                else:
+                    logger.error(f"Failed to create customer (attempt {attempt + 1}): {error_msg}")
 
         # Final fallback
         final_id = self.get_customer_id_by_name(full_display_name)
         if final_id:
+            logger.info(f"Customer appeared after retries → QB ID {final_id}")
             return final_id
 
-        raise RuntimeError(f"Failed to create or find customer after retries: {full_display_name}")
-
-
+        raise RuntimeError(f"Failed to create or find customer after all retries: {full_display_name}")
     def get_customer_id_by_name(self, full_display_name: str) -> str | None:
         """
         Works on EVERY QuickBooks Online company, even old ones without STARTSWITH.
