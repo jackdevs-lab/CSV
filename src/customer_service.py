@@ -1,5 +1,6 @@
 # src/customer_service.py
 import requests
+import time
 from src.logger import setup_logger
 import pandas as pd
 
@@ -10,92 +11,67 @@ class CustomerService:
         self.qb_client = qb_client
 
     def find_or_create_customer(self, group, mapper, customer_type="patient", insurance_name=None):
-    # 1. Build the exact DisplayName we want to use
         patient_name_raw = group['Patient Name'].iloc[0]
         patient_id_raw = group['Patient ID'].iloc[0]
-        invoice_num = group['Invoice No.'].iloc[0]
 
-        patient_name = str(patient_name_raw).strip() if pd.notna(patient_name_raw) else "Unknown Patient"
-        patient_name = ' '.join(patient_name.split()).title()
-
+        patient_name = ' '.join(str(patient_name_raw).strip().split()).title() if pd.notna(patient_name_raw) else "Unknown Patient"
         patient_id = str(patient_id_raw).strip() if pd.notna(patient_id_raw) else "UnknownID"
 
+        # FULL NAME USED IN QUICKBOOKS
         if customer_type == "insurance" and insurance_name:
-            customer_name = str(insurance_name).strip()
+            full_display_name = str(insurance_name).strip().title()
         else:
-            customer_name = f"{patient_name} ID {patient_id}".strip()
-            customer_name = ' '.join(customer_name.split()).title()
+            full_display_name = f"{patient_name} ID {patient_id}"
 
-        # 2. FIRST: Always try to find by DisplayName
-        existing_id = self.get_customer_id_by_name(patient_name, patient_id)
+        # SEARCH USING FULL NAME
+        existing_id = self.get_customer_id_by_name(full_display_name)
         if existing_id:
-            return existing_id  # Done. Customer exists.
+            return existing_id
 
-        # 3. ONLY if not found → create
-        logger.info(f"Customer not found: '{customer_name}' → creating new one")
-        safe_email = ''.join(c if c.isalnum() or c == '.' else '' for c in customer_name.lower())
+        logger.info(f"Customer not found: '{full_display_name}' → creating new one")
+
+        safe_email = ''.join(c for c in full_display_name.lower() if c.isalnum() or c == '.')
         payload = {
-            "DisplayName": customer_name,
+            "DisplayName": full_display_name,
             "PrimaryEmailAddr": {"Address": f"{safe_email}@example.com"},
             "PrimaryPhone": {"FreeFormNumber": "555-0123"}
         }
         if customer_type == "insurance":
-            payload["CompanyName"] = customer_name
+            payload["CompanyName"] = full_display_name
         else:
             payload["GivenName"] = patient_name
 
         try:
             resp = self.qb_client.create_customer(payload)
             new_id = resp["Customer"]["Id"]
-            logger.info(f"Successfully created customer: '{customer_name}' → ID {new_id}")
+            logger.info(f"Created customer '{full_display_name}' → ID {new_id}")
+            time.sleep(1.5)  # Let QB index it
             return new_id
         except requests.exceptions.HTTPError as e:
-            # Handle QuickBooks duplicate name error
-            if hasattr(e, 'response') and e.response is not None and 'Duplicate Name Exists' in e.response.text:
-                logger.warning(f"Customer '{customer_name}' already exists according to QuickBooks. Fetching existing ID.")
-                # Try fetching the existing customer ID again
-                existing_id = self.get_customer_id_by_name(patient_name, patient_id)
-                if existing_id:
-                    return existing_id
-            logger.error(f"CRITICAL: Failed to create customer '{customer_name}': {e}")
-            if hasattr(e, 'response') and e.response:
-                logger.error(f"Response: {e.response.text}")
+            if e.response and 'Duplicate Name Exists' in e.response.text:
+                logger.warning(f"Duplicate name error for '{full_display_name}', retrying search...")
+                time.sleep(2)
+                return self.get_customer_id_by_name(full_display_name) or new_id
+            logger.error(f"Create customer failed: {e.response.text if e.response else e}")
             raise
 
-
-    def get_customer_id_by_name(self, name: str, patient_id: str | None = None) -> str | None:
-        name = ' '.join(str(name).strip().split()).title()
-        patient_id = str(patient_id).strip() if patient_id else None
-
-        # Build the exact name we use when creating
-        if patient_id and patient_id != "UnknownID":
-            search_names = [
-                f"{name} Id {patient_id}",
-                f"{name} ID {patient_id}",
-                f"{name} id {patient_id}",
-                f"{name} Id {patient_id.lower()}",
-                name  # fallback
-            ]
-        else:
-            search_names = [name]
-
-        for display_name in search_names:
-            escaped = display_name.replace("'", "''")
-            query = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 5"
-            data = self.qb_client._query_safe(query)
-            customers = data.get('QueryResponse', {}).get('Customer', [])
-            if customers:
-                logger.info(f"Found customer by DisplayName '{display_name}' → ID {customers[0]['Id']}")
-                return str(customers[0]['Id'])
-
-        # Fallback: fuzzy search in case formatting differs slightly
-        query = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName LIKE '%{name.replace("'", "''")}%' MAXRESULTS 10"
-        data = self.qb_client._query_safe(query)
-        for cust in data.get('QueryResponse', {}).get('Customer', []):
-            dn = cust['DisplayName']
-            if patient_id and patient_id.lower() in dn.lower() and any(word in dn.lower() for word in name.lower().split()):
-                logger.info(f"Fuzzy matched customer '{dn}' → ID {cust['Id']}")
-                return str(cust['Id'])
-
-        logger.info(f"Customer truly not found: '{name}' with ID '{patient_id}'")
+    def get_customer_id_by_name(self, full_display_name: str) -> str | None:
+        variations = [
+            full_display_name,
+            full_display_name.replace(" ID ", " Id "),
+            full_display_name.replace(" ID ", " id "),
+        ]
+        for name in variations:
+            escaped = name.replace("'", "''")
+            query = f"SELECT Id FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 3"
+            try:
+                data = self.qb_client._query_safe(query)
+                customers = data.get('QueryResponse', {}).get('Customer', [])
+                if customers:
+                    cid = str(customers[0]['Id'])
+                    logger.info(f"Found existing customer: '{name}' → ID {cid}")
+                    return cid
+            except Exception:
+                continue
+        logger.info(f"Customer truly not found: '{full_display_name}'")
         return None
