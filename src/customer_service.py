@@ -75,7 +75,13 @@ class CustomerService:
         ]
         for name in variations:
             escaped = name.replace("'", "''")
-            query = f"SELECT Id FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 3"
+            query = f"""
+                        SELECT Id, DisplayName 
+                        FROM Customer 
+                        WHERE LOWER(DisplayName) LIKE LOWER('{escaped}%') 
+                        MAXRESULTS 20
+                        """
+
             try:
                 data = self.qb_client._query_safe(query)
                 customers = data.get('QueryResponse', {}).get('Customer', [])
@@ -83,7 +89,9 @@ class CustomerService:
                     cid = str(customers[0]['Id'])
                     logger.info(f"Found existing customer: '{name}' → ID {cid}")
                     return cid
-            except Exception:
+            except Exception as e:
+                logger.error(f"Lookup failed for '{name}' → {e}")
                 continue
+
         logger.info(f"Customer truly not found: '{full_display_name}'")
         return None
