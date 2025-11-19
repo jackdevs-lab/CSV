@@ -4,25 +4,21 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-def setup_logger(name, log_level=logging.INFO):
-    """Setup logger with consistent formatting"""
+def setup_logger(name, log_level=logging.DEBUG):
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
-    
+
     if not logger.handlers:
-        # Create console handler
         ch = logging.StreamHandler()
         ch.setLevel(log_level)
-        
-        # Create formatter
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         ch.setFormatter(formatter)
-        
         logger.addHandler(ch)
-    
+
     return logger
+
 
 def move_file_to_processed(file_path):
     """Move processed file to processed directory"""
