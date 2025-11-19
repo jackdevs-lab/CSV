@@ -46,16 +46,26 @@ class CustomerService:
             new_id = resp["Customer"]["Id"]
             logger.info(f"Created customer '{full_display_name}' → ID {new_id}")
 
-            # THIS IS THE KEY: Wait until QB knows about this customer
+            # Ensure QuickBooks recognizes the new customer
             if not self.qb_client.verify_customer_exists(new_id):
                 raise RuntimeError(f"Customer {new_id} created but not indexed in time")
 
             return new_id
+
         except requests.exceptions.HTTPError as e:
-            if e.response and 'Duplicate Name Exists' in e.response.text:
+            # Handle duplicate name gracefully
+            if e.response is not None and 'Duplicate Name Exists' in e.response.text:
+                logger.warning(f"Duplicate name detected for '{full_display_name}', retrying lookup...")
                 time.sleep(2)
-                return self.get_customer_id_by_name(full_display_name) or new_id
-            raise
+                existing_id = self.get_customer_id_by_name(full_display_name)
+                if existing_id:
+                    return existing_id
+                else:
+                    raise RuntimeError(f"Duplicate name error but customer '{full_display_name}' still not found")
+            else:
+                # Re-raise any other HTTP error
+                raise
+
 
     def get_customer_id_by_name(self, full_display_name: str) -> str | None:
         variations = [
