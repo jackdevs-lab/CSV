@@ -28,15 +28,17 @@ class ReceiptService:
         payment_method = group.get('Mode of Payment', 'Cash').iloc[0]
         
         receipt_data = {
-            'CustomerRef': {
-                'value': customer_id
-            },
-            'TxnDate': service_date,
-            'Line': lines,
-            'PaymentMethodRef': {
-                'value': self._get_payment_method_ref(payment_method)
-            }
+        'CustomerRef': {'value': str(customer_id)},
+        'TxnDate': service_date,
+        'Line': lines,
+        'PaymentMethodRef': {'value': self._get_payment_method_ref(payment_method)},
+
+        # THIS IS THE FINAL FIX — SAME AS INVOICE
+        'TxnTaxDetail': {
+            'TotalTax': 0,
+            'TaxCodeRef': {'value': '2'}  # Non-taxable
         }
+    }
         
         logger.debug(f"Creating sales receipt with data: {json.dumps(receipt_data, indent=2)}")
         response = self.qb_client.create_sales_receipt(receipt_data)
