@@ -32,10 +32,12 @@ class ReceiptService:
             'TxnDate': service_date,
             'Line': lines,
             'PaymentMethodRef': {'value': str(self._get_payment_method_ref(payment_method))},
+            'DepositToAccountRef': {'value': '78'},  # Undeposited Funds
             'TxnTaxDetail': {
-                'TaxCodeRef': {'value': '2'}  # Non-taxable
+                'TaxCodeRef': {'value': '2'}
             }
         }
+
 
         
         logger.debug(f"Creating sales receipt with data: {json.dumps(receipt_data, indent=2)}")
