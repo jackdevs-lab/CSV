@@ -241,9 +241,11 @@ def upload_file():
         file.save(tmp.name)
         tmp_path = tmp.name
 
-    success, logs = process_csv_file(tmp_path)
-    os.unlink(tmp_path)
-    return jsonify({'success': success, 'logs': logs})
+    try:
+        success, logs = process_csv_file(tmp_path)
+    finally:
+        os.unlink(tmp_path)
+
 
 @app.route('/login')
 def login():
