@@ -26,17 +26,15 @@ class InvoiceService:
         patient_name = group['Patient Name'].iloc[0]
         
         invoice_data = {
-        'CustomerRef': {'value': str(customer_id)},
-        'TxnDate': service_date,
-        'Line': lines,
-        'CustomerMemo': {'value': f"Medical service for {patient_name}"},
-
-        # THIS IS THE FINAL FIX — KILLS THE TAX ERROR FOREVER
-        'TxnTaxDetail': {
-            'TotalTax': 0,
-            'TaxCodeRef': {'value': '2'}  # 2 = Non-Taxable / Tax Exempt in 99.9% of companies
+            "CustomerRef": {"value": str(customer_id)},
+            "TxnDate": service_date,
+            "Line": lines,  # ensure each line has TaxCodeRef inside SalesItemLineDetail
+            "CustomerMemo": {"value": f"Medical service for {patient_name}"},
+            "TxnTaxDetail": {
+                "TaxCodeRef": {"value": "2"}  # Non-taxable
+            }
         }
-    }
+
         
         logger.debug(f"Creating invoice with data: {json.dumps(invoice_data, indent=2)}")
         response = self.qb_client.create_invoice(invoice_data)
