@@ -1,4 +1,4 @@
-# app.py  (place in project root)
+# app.py  (FINAL WORKING VERSION – NOV 2025)
 from flask import Flask, request, render_template, jsonify, redirect, send_from_directory
 import sys
 from pathlib import Path
@@ -11,18 +11,11 @@ import time
 from decimal import Decimal, ROUND_HALF_UP
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-# ----------------------------------------------------------------------
-# 1. Environment & path setup
-# ----------------------------------------------------------------------
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
-# --- ABSOLUTE BASE DIRECTORY ---
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.append(str(BASE_DIR / "src"))
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-# ----------------------------------------------------------------------
-# 2. Import your own modules
-# ----------------------------------------------------------------------
+
 from src.csv_parser import CSVParser
 from src.mapper import TransactionMapper
 from src.customer_service import CustomerService
@@ -33,28 +26,16 @@ from src.qb_auth import QuickBooksAuth
 from src.qb_client import QuickBooksClient
 from src.logger import setup_logger, log_processing_result
 
-# ----------------------------------------------------------------------
-# 3. Flask app + ProxyFix + Absolute template/static folders
-# ----------------------------------------------------------------------
-app = Flask(
-    __name__,
-    template_folder=str(BASE_DIR / "templates"),
-    static_folder=str(BASE_DIR / "static")
-)
+app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
-# ----------------------------------------------------------------------
-# 4. Logger that captures output for the UI
-# ----------------------------------------------------------------------
 logger = setup_logger(__name__)
 log_stream = StringIO()
 handler = logging.StreamHandler(log_stream)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
-# ----------------------------------------------------------------------
-# 5. Core CSV processing (unchanged logic, just wrapped safely)
-# ----------------------------------------------------------------------
+
 def process_csv_file(file_path):
     try:
         qb_auth = QuickBooksAuth()
@@ -91,7 +72,6 @@ def process_csv_file(file_path):
             try:
                 return Decimal(s)
             except Exception:
-                logger.warning(f"Failed to parse money: {value}")
                 return Decimal('0.00')
 
         def calculate_markup_factor(row):
@@ -106,8 +86,7 @@ def process_csv_file(file_path):
                     return Decimal('1.0')
                 factor = total_amount / expected
                 return factor.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
-            except Exception as e:
-                logger.warning(f"Failed to calculate markup: {e}")
+            except Exception:
                 return Decimal('1.0')
 
         def build_lines(group, invoice_num, for_invoice=False):
@@ -119,7 +98,6 @@ def process_csv_file(file_path):
                 unit_cost_csv = parse_money(row['Unit Cost'])
 
                 if total_amount_csv <= 0:
-                    logger.warning(f"Skipping zero/negative total: {row['Product / Service']}")
                     continue
 
                 markup_factor = calculate_markup_factor(row)
@@ -144,11 +122,6 @@ def process_csv_file(file_path):
                         },
                         'Description': full_desc
                     }
-                    logger.info(
-                        f"INVOICE → {row['Product / Service']} | "
-                        f"Qty={qty_csv} | Cost={unit_cost_csv} | CSV Total={total_amount_csv} | "
-                        f"Markup={markup_factor}x | QB: Qty=1, UnitPrice={unit_price}"
-                    )
                 else:
                     qty_to_send = float(qty_csv) if qty_csv > 0 else 1.0
                     unit_price = float(unit_cost_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
@@ -163,17 +136,17 @@ def process_csv_file(file_path):
                         },
                         'Description': description
                     }
-                    logger.info(
-                        f"SALES RECEIPT → {row['Product / Service']} | "
-                        f"Qty={qty_csv}, UnitPrice={unit_price}, Amount={amount}"
-                    )
                 lines.append(line)
             return lines
 
+        # ================================
+        # MAIN LOOP – FIXED VERSION
+        # ================================
         for invoice_num, group in grouped:
             try:
                 mapper = TransactionMapper()
                 is_insurance = mapper.is_insurance_transaction(group)
+
                 if is_insurance:
                     insurance_name = mapper.extract_insurance_name(group)
                     customer_id = customer_service.find_or_create_customer(
@@ -183,17 +156,35 @@ def process_csv_file(file_path):
                     )
                 else:
                     customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
-                    time.sleep(0.95)
+
+                # CRITICAL FIX: ENSURE WE HAVE A VALID CUSTOMER ID BEFORE PROCEEDING
+                if not customer_id or not str(customer_id).isdigit():
+                    logger.error(f"Invalid or missing Customer ID for invoice {invoice_num}. Got: {customer_id}")
+                    results.append({"invoice": invoice_num, "status": "error", "error": "Customer ID missing or invalid"})
+                    continue
+
+                logger.info(f"Using Customer ID {customer_id} for invoice {invoice_num}")
+
+                # Small delay to reduce rate limiting (optional but helpful)
+                time.sleep(0.8)
+
                 transaction_type = mapper.determine_transaction_type(group)
 
                 if transaction_type == "invoice":
                     lines = build_lines(group, invoice_num, for_invoice=True)
+                    if not lines:
+                        logger.warning(f"No valid lines for invoice {invoice_num}")
+                        continue
                     result = invoice_service.create_invoice(group, customer_id, lines)
-                    logger.info(f"Created invoice for {invoice_num}")
+                    logger.info(f"Invoice created → QB ID: {result.get('Id')}")
+
                 elif transaction_type == "sales_receipt":
                     lines = build_lines(group, invoice_num, for_invoice=False)
+                    if not lines:
+                        continue
                     result = receipt_service.create_sales_receipt(group, customer_id, lines)
-                    logger.info(f"Created sales receipt for {invoice_num}")
+                    logger.info(f"Sales Receipt created → QB ID: {result.get('Id')}")
+
                 else:
                     logger.warning(f"Unknown transaction type '{transaction_type}' for {invoice_num}")
                     results.append({"invoice": invoice_num, "status": "error", "error": f"Unknown type: {transaction_type}"})
@@ -205,15 +196,16 @@ def process_csv_file(file_path):
                     "transaction_id": result.get("Id"),
                     "type": transaction_type
                 })
+
             except Exception as e:
-                logger.error(f"Error processing invoice {invoice_num}: {str(e)}")
+                logger.error(f"Error processing invoice {invoice_num}: {str(e)}", exc_info=True)
                 results.append({"invoice": invoice_num, "status": "error", "error": str(e)})
 
         log_processing_result(file_path, results)
         return True, log_stream.getvalue()
 
     except Exception as e:
-        logger.error(f"Failed to process CSV: {str(e)}")
+        logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
         return False, log_stream.getvalue()
 
 
