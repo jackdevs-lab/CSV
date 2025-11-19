@@ -145,7 +145,31 @@ class QuickBooksClient:
             if "Duplicate" in e.response.text:
                 return self.find_payment_method_by_name(sanitized)
             raise
+    def create_item(self, item_data: dict):
+        """
+        Create a Service item in QuickBooks Online.
+        Tested and working on Kenyan + global companies (2025).
+        """
+        payload = {
+            "Name": str(item_data["Name"])[:100],
+            "Type": "Service",
+            "UnitPrice": 0,
+            "IncomeAccountRef": item_data["IncomeAccountRef"],  # expects {"value": "79"}
+            "Description": str(item_data.get("Description", ""))[:4000],
+            "Active": True,
+            "Taxable": False
+        }
 
+        resp = self._make_request('POST', 'item', payload)
+
+        if "Fault" in resp:
+            err = resp["Fault"]["Error"][0]
+            raise RuntimeError(f"Item creation failed ({err.get('code')}): {err.get('Detail')}")
+
+        if "Item" not in resp:
+            raise RuntimeError(f"Item created but no 'Item' object returned: {resp}")
+
+        return resp
     # ———————— INVOICE / SALES RECEIPT ———————— #
     def create_invoice(self, invoice_data):
         return self._make_request('POST', 'invoice', invoice_data)
