@@ -71,14 +71,11 @@ class CustomerService:
             return cid
 
         # 2. Try case-insensitive CONTAINS fallback
-        query2 = f"SELECT Id FROM Customer WHERE CONTAINS(DisplayName, '{escaped}') MAXRESULTS 5"
-        data = self.qb_client._query_safe(query2)
-        customers = data.get('QueryResponse', {}).get('Customer', [])
-        for cust in customers:
-            if name.lower() == cust.get('DisplayName', '').strip().lower():
-                cid = str(cust['Id'])
-                logger.info(f"Customer found (fuzzy match): '{name}' → '{cust.get('DisplayName')}' → ID {cid}")
-                return cid
+        query = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 10"
+        data = self.qb_client._query_safe(query)
+        for cust in data.get('QueryResponse', {}).get('Customer', []):
+            if name.lower() == cust.get('DisplayName','').strip().lower():
+                return str(cust['Id'])
 
         logger.info(f"Customer truly not found: '{name}'")
         return None
