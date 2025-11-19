@@ -148,3 +148,17 @@ class QuickBooksClient:
 
     def query(self, sql: str):
         return self._query_safe(sql)
+    def verify_customer_exists(self, customer_id: str, max_retries: int = 10) -> bool:
+        """Wait until QuickBooks indexes a newly created customer"""
+        for attempt in range(max_retries):
+            query = f"SELECT Id FROM Customer WHERE Id = {customer_id}"
+            try:
+                data = self._query_safe(query)
+                if data.get('QueryResponse', {}).get('Customer'):
+                    logger.info(f"Customer {customer_id} is now indexed (attempt {attempt + 1})")
+                    return True
+            except:
+                pass
+            time.sleep(1.5)
+        logger.error(f"Customer {customer_id} never became available after {max_retries} retries")
+        return False

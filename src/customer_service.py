@@ -45,14 +45,16 @@ class CustomerService:
             resp = self.qb_client.create_customer(payload)
             new_id = resp["Customer"]["Id"]
             logger.info(f"Created customer '{full_display_name}' → ID {new_id}")
-            time.sleep(1.5)  # Let QB index it
+
+            # THIS IS THE KEY: Wait until QB knows about this customer
+            if not self.qb_client.verify_customer_exists(new_id):
+                raise RuntimeError(f"Customer {new_id} created but not indexed in time")
+
             return new_id
         except requests.exceptions.HTTPError as e:
             if e.response and 'Duplicate Name Exists' in e.response.text:
-                logger.warning(f"Duplicate name error for '{full_display_name}', retrying search...")
                 time.sleep(2)
                 return self.get_customer_id_by_name(full_display_name) or new_id
-            logger.error(f"Create customer failed: {e.response.text if e.response else e}")
             raise
 
     def get_customer_id_by_name(self, full_display_name: str) -> str | None:
