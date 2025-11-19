@@ -96,11 +96,13 @@ class QuickBooksClient:
     )
 
     def create_customer(self, customer_data):
-        resp = self._make_request('POST', 'customer', customer_data)
-        customer = resp.get('Customer', {})
-        if not customer.get('Id'):
-            raise ValueError("Customer created but no Id returned")
-        return customer
+        response = self._make_request('POST', 'customer', customer_data)
+        # DO NOT raise_for_status here — let caller handle Fault
+        json_resp = response.json()
+        if "Fault" in json_resp:
+            error_msg = json_resp["Fault"]["Error"][0]["Detail"]
+            raise RuntimeError(f"QuickBooks rejected customer: {error_msg}")
+        return json_resp
 
     # ———————— ITEM METHODS ———————— #
     def find_item_by_name(self, name: str):

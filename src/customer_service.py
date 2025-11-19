@@ -17,13 +17,12 @@ class CustomerService:
         patient_name = ' '.join(str(patient_name_raw).strip().split()).title() if pd.notna(patient_name_raw) else "Unknown Patient"
         patient_id = str(patient_id_raw).strip() if pd.notna(patient_id_raw) else "UnknownID"
 
-        # FULL NAME USED IN QUICKBOOKS
         if customer_type == "insurance" and insurance_name:
             full_display_name = str(insurance_name).strip().title()
         else:
             full_display_name = f"{patient_name} ID {patient_id}"
 
-        # SEARCH USING FULL NAME
+        # Try to find existing
         existing_id = self.get_customer_id_by_name(full_display_name)
         if existing_id:
             return existing_id
@@ -34,37 +33,62 @@ class CustomerService:
         payload = {
             "DisplayName": full_display_name,
             "PrimaryEmailAddr": {"Address": f"{safe_email}@example.com"},
-            "PrimaryPhone": {"FreeFormNumber": "555-0123"}
+            "PrimaryPhone": {"FreeFormNumber": "555-0123"},
+            "BillAddr": {                     # ← THIS IS REQUIRED IN MOST COMPANIES
+                "Line1": "N/A",
+                "City": "Nairobi",
+                "Country": "Kenya",
+                "CountrySubDivisionCode": "KE-110"
+            },
+            "Taxable": False,                 
         }
+
         if customer_type == "insurance":
             payload["CompanyName"] = full_display_name
         else:
             payload["GivenName"] = patient_name
 
-        try:
-            resp = self.qb_client.create_customer(payload)
-            new_id = resp["Customer"]["Id"]
-            logger.info(f"Created customer '{full_display_name}' → ID {new_id}")
-
-            # Ensure QuickBooks recognizes the new customer
-            if not self.qb_client.verify_customer_exists(new_id):
-                raise RuntimeError(f"Customer {new_id} created but not indexed in time")
-
-            return new_id
-
-        except requests.exceptions.HTTPError as e:
-            # Handle duplicate name gracefully
-            if e.response is not None and 'Duplicate Name Exists' in e.response.text:
-                logger.warning(f"Duplicate name detected for '{full_display_name}', retrying lookup...")
-                time.sleep(2)
-                existing_id = self.get_customer_id_by_name(full_display_name)
-                if existing_id:
-                    return existing_id
+        for attempt in range(3):
+            try:
+                resp = self.qb_client.create_customer(payload)
+                
+                # SUCCESS RESPONSE — now it's safe
+                if "Customer" in resp:
+                    new_id = str(resp["Customer"]["Id"])
+                    logger.info(f"Created customer '{full_display_name}' → QB ID {new_id}")
+                    time.sleep(1)  # let QBO index it
+                    return new_id
                 else:
-                    raise RuntimeError(f"Duplicate name error but customer '{full_display_name}' still not found")
-            else:
-                # Re-raise any other HTTP error
-                raise
+                    # If no Customer key → it was a fault
+                    fault = resp.get("Fault", {})
+                    error_detail = fault.get("Error", [{}])[0].get("Detail", "Unknown error")
+                    logger.error(f"QB rejected customer creation: {error_detail}")
+                    if "Duplicate" in resp:
+                        # Try to recover from duplicate
+                        time.sleep(2)
+                        return self.get_customer_id_by_name(full_display_name)
+                    raise RuntimeError(f"Customer creation failed: {error_detail}")
+
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None:
+                    try:
+                        error_json = e.response.json()
+                        if "Duplicate" in str(error_json):
+                            logger.warning("Duplicate detected, retrying lookup...")
+                            time.sleep(2)
+                            return self.get_customer_id_by_name(full_display_name)
+                    except:
+                        pass
+                logger.error(f"HTTP error creating customer: {e}")
+            logger.error(f"HTTP error creating customer: {e}")
+            time.sleep(2)
+
+        # Final fallback
+        final_id = self.get_customer_id_by_name(full_display_name)
+        if final_id:
+            return final_id
+
+        raise RuntimeError(f"Failed to create or find customer after retries: {full_display_name}")
 
 
     def get_customer_id_by_name(self, full_display_name: str) -> str | None:
