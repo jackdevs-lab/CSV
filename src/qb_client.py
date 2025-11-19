@@ -88,29 +88,11 @@ class QuickBooksClient:
 
     # ———————— CUSTOMER METHODS ———————— #
     def find_customer_by_name(self, name: str):
-        if not name or not name.strip():
-            return None
-
-        name = name.strip()
-        escaped = name.replace("'", "''")
-
-        # Exact match
-        query = f"SELECT * FROM Customer WHERE DisplayName = '{escaped}'"
-        data = self._query_safe(query)
-        for cust in data.get('QueryResponse', {}).get('Customer', []):
-            if cust.get('DisplayName') == name and cust.get('Id', 0) != 0:
-                return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
-
-        # Partial fallback
-        query = f"SELECT * FROM Customer WHERE DisplayName LIKE '%{escaped}%' MAXRESULTS 10"
-        data = self._query_safe(query)
-        for cust in data.get('QueryResponse', {}).get('Customer', []):
-            if name.lower() in (cust.get('DisplayName') or '').lower() and cust.get('Id', 0) != 0:
-                logger.info(f"Partial match: '{name}' → '{cust.get('DisplayName')}' (ID: {cust['Id']})")
-                return {"Id": str(cust['Id']), "DisplayName": cust['DisplayName']}
-
-        logger.info(f"Customer not found: '{name}'")
-        return None
+            raise RuntimeError(
+        "find_customer_by_name() is banned.\n"
+        "Use CustomerService.find_or_create_customer() instead.\n"
+        "This method caused 'Customer not found' errors for days."
+    )
 
     def create_customer(self, customer_data):
         resp = self._make_request('POST', 'customer', customer_data)
