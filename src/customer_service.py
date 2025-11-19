@@ -64,52 +64,38 @@ class CustomerService:
 
 
     def get_customer_id_by_name(self, name: str, patient_id: str | None = None) -> str | None:
-        """
-        Find a customer in QuickBooks by DisplayName.
-
-        Args:
-            name: Base name of the customer (e.g., 'Peris Mwitha Ndegwa').
-            patient_id: Optional patient ID to match exactly.
-
-        Returns:
-            Customer Id if found, else None.
-        """
-        import re
-
-        # 1. Normalize the input
-        name = ' '.join(name.strip().split()).lower()
+        name = ' '.join(str(name).strip().split()).title()
         patient_id = str(patient_id).strip() if patient_id else None
 
-        # Escape single quotes for QB query
-        escaped = name.replace("'", "''")
+        # Build the exact name we use when creating
+        if patient_id and patient_id != "UnknownID":
+            search_names = [
+                f"{name} Id {patient_id}",
+                f"{name} ID {patient_id}",
+                f"{name} id {patient_id}",
+                f"{name} Id {patient_id.lower()}",
+                name  # fallback
+            ]
+        else:
+            search_names = [name]
 
-        # 2. Try exact match first
-        query1 = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 10"
-        data = self.qb_client._query_safe(query1)
-        customers = data.get('QueryResponse', {}).get('Customer', [])
-        for cust in customers:
-            cust_name = cust.get('DisplayName', '').lower().strip()
-            if name == cust_name:
-                if patient_id:
-                    # Check if ID is part of DisplayName
-                    if f"id {patient_id.lower()}" in cust_name:
-                        return str(cust['Id'])
-                else:
-                    return str(cust['Id'])
+        for display_name in search_names:
+            escaped = display_name.replace("'", "''")
+            query = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 5"
+            data = self.qb_client._query_safe(query)
+            customers = data.get('QueryResponse', {}).get('Customer', [])
+            if customers:
+                logger.info(f"Found customer by DisplayName '{display_name}' → ID {customers[0]['Id']}")
+                return str(customers[0]['Id'])
 
-        # 3. Try "contains" fallback
-        for cust in customers:
-            cust_name = cust.get('DisplayName', '').lower().strip()
-            # Remove extra non-alphanumerics for fuzzy match
-            clean_cust = re.sub(r'\W+', '', cust_name)
-            clean_name = re.sub(r'\W+', '', name)
-            if clean_name in clean_cust:
-                if patient_id:
-                    if f"id{patient_id.lower()}" in clean_cust:
-                        return str(cust['Id'])
-                else:
-                    return str(cust['Id'])
+        # Fallback: fuzzy search in case formatting differs slightly
+        query = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName LIKE '%{name.replace("'", "''")}%' MAXRESULTS 10"
+        data = self.qb_client._query_safe(query)
+        for cust in data.get('QueryResponse', {}).get('Customer', []):
+            dn = cust['DisplayName']
+            if patient_id and patient_id.lower() in dn.lower() and any(word in dn.lower() for word in name.lower().split()):
+                logger.info(f"Fuzzy matched customer '{dn}' → ID {cust['Id']}")
+                return str(cust['Id'])
 
-        # 4. Truly not found
         logger.info(f"Customer truly not found: '{name}' with ID '{patient_id}'")
         return None

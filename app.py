@@ -243,8 +243,17 @@ def upload_file():
 
     try:
         success, logs = process_csv_file(tmp_path)
+        return jsonify({'success': success, 'logs': logs})
+    except Exception as e:
+        logger.error(f"Processing failed: {e}", exc_info=True)
+        return jsonify({'success': False, 'logs': log_stream.getvalue()}), 500
     finally:
-        os.unlink(tmp_path)
+        # SAFE delete – ignore if file gone
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except Exception as e:
+            logger.warning(f"Could not delete temp file {tmp_path}: {e}")
 
 
 @app.route('/login')
