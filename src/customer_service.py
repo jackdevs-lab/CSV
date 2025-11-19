@@ -69,64 +69,45 @@ class CustomerService:
 
     def get_customer_id_by_name(self, full_display_name: str) -> str | None:
         """
-        Search for an existing customer by DisplayName using QBO-supported syntax.
-        QBO does NOT allow LOWER() or any function calls in WHERE clauses.
-        Fortunately, DisplayName LIKE is case-insensitive by default in most companies.
+        Works on EVERY QuickBooks Online company, even old ones without STARTSWITH.
+        Uses only LIKE + = which are supported since 2013.
         """
-        # Escape single quotes properly
-        escaped_name = full_display_name.replace("'", "''")
+        # Escape single quotes
+        escaped = full_display_name.replace("'", "''")
 
-        # We try multiple variations because users sometimes have inconsistent capitalization/spacing
-        search_variations = [
-            full_display_name,                                  # Exact: "Nelly Wacuka Kingara ID 5020"
-            full_display_name.replace(" ID ", " Id "),         # "Nelly Wacuka Kingara Id 5020"
-            full_display_name.replace(" ID ", " id "),         # "Nelly Wacuka Kingara id 5020"
+        # Try exact match first (fastest, most reliable)
+        query_exact = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName = '{escaped}' MAXRESULTS 1"
+        try:
+            data = self.qb_client._query_safe(query_exact)
+            customers = data.get('QueryResponse', {}).get('Customer', [])
+            if customers:
+                cid = str(customers[0]['Id'])
+                logger.info(f"Exact match found: '{full_display_name}' → QB ID {cid}")
+                return cid
+        except Exception as e:
+            logger.debug(f"Exact match query failed (normal if none): {e}")
+
+        # Fallback: case-insensitive partial match using LIKE with wildcards
+        # QBO's LIKE is case-insensitive by default in 99% of companies
+        variations = [
+            full_display_name,
+            full_display_name.replace(" ID ", " Id "),
+            full_display_name.replace(" ID ", " id "),
         ]
 
-        for name_variant in search_variations:
-            # Option A: STARTSWITH – fastest, officially supported, case-insensitive
-            query = f"""
-                SELECT Id, DisplayName 
-                FROM Customer 
-                WHERE DisplayName STARTSWITH '{name_variant}'
-                MAXRESULTS 10
-            """.strip()
-
+        for variant in variations:
+            esc_variant = variant.replace("'", "''")
+            query = f"SELECT Id, DisplayName FROM Customer WHERE DisplayName LIKE '%{esc_variant}%' MAXRESULTS 5"
             try:
                 data = self.qb_client._query_safe(query)
                 customers = data.get('QueryResponse', {}).get('Customer', [])
                 if customers:
+                    # Return the first one — or you can add logic to pick best match
                     match = customers[0]
-                    logger.info(f"Found customer via STARTSWITH: '{name_variant}' → QB ID {match['Id']}")
+                    logger.info(f"Found via LIKE: '{match['DisplayName']}' ≈ '{full_display_name}' → QB ID {match['Id']}")
                     return str(match['Id'])
             except Exception as e:
-                logger.debug(f"STARTSWITH query failed for '{name_variant}': {e}")
-                # Fall through to next variation or method
-
-            # Option B: Fallback to LIKE with wildcard (still no LOWER()!)
-            # This catches cases where there are extra spaces or minor differences
-            query_like = f"""
-                SELECT Id, DisplayName 
-                FROM Customer 
-                WHERE DisplayName LIKE '%{escaped_name}%'
-                MAXRESULTS 10
-            """.strip()
-
-            try:
-                data = self.qb_client._query_safe(query_like)
-                customers = data.get('QueryResponse', {}).get('Customer', [])
-                if customers:
-                    # Optional: pick the best match (exact or longest prefix)
-                    for cust in customers:
-                        if cust['DisplayName'] == full_display_name:
-                            logger.info(f"Exact match found via LIKE: '{full_display_name}' → QB ID {cust['Id']}")
-                            return str(cust['Id'])
-                    # Otherwise return first match
-                    match = customers[0]
-                    logger.info(f"Partial match via LIKE: '{match['DisplayName']}' ≈ '{full_display_name}' → QB ID {match['Id']}")
-                    return str(match['Id'])
-            except Exception as e:
-                logger.debug(f"LIKE query failed for '{full_display_name}': {e}")
+                logger.debug(f"LIKE query failed for variant '{variant}': {e}")
 
         logger.info(f"Customer truly not found: '{full_display_name}'")
         return None
