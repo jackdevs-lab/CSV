@@ -10,3 +10,4 @@ python-multipart>=0.0.5
 typing-extensions>=4.0.0
 Jinja2>=3.0.0
 itsdangerous>=2.1.0
+gunicorn>=20.1.0
