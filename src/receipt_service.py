@@ -14,7 +14,7 @@ class ReceiptService:
 
         # ONE SINGLE SOURCE OF TRUTH — CHANGE THIS ONLY ONCE
         # Find this number once (see instructions below) and put it here forever
-        self.CASH_PAYMENT_METHOD_ID = "52"   # ←←← CHANGE THIS TO YOUR REAL "Cash" ID
+          # ←←← CHANGE THIS TO YOUR REAL "Cash" ID
 
         # Optional: keep the old auto-create logic as fallback (very safe)
         self.payment_method_ids = {}
@@ -33,8 +33,7 @@ class ReceiptService:
             'CustomerRef': {'value': str(customer_id)},
             'TxnDate': service_date,
             'Line': lines,
-            'PaymentMethodRef': {'value': self.CASH_PAYMENT_METHOD_ID},   # always Cash
-            'DepositToAccountRef': {'value': '78'},                      # Undeposited Funds
+                               # Undeposited Funds
             
         }
 
