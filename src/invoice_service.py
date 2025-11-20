@@ -28,8 +28,9 @@ class InvoiceService:
         invoice_data = {
             "CustomerRef": {"value": str(customer_id)},
             "TxnDate": service_date,
-            "Line": lines,  # ensure each line has TaxCodeRef inside SalesItemLineDetail
-            "CustomerMemo": {"value": f"Medical service for {patient_name}"},
+            "Line": lines,
+            "DocNumber": str(group['Invoice No.'].iloc[0]),  # ensure each line has TaxCodeRef inside SalesItemLineDetail
+            "CustomerMemo": {"value": f"Medical service for {patient_name}"}
             
         }
 
