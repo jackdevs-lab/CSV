@@ -120,7 +120,8 @@ def process_csv_file(file_path):
                             'ItemRef': {'value': str(item_id)},
                             'Qty': 1.0,
                             'UnitPrice': float(unit_price),
-                            'TaxCodeRef': {'value': '2'}
+                            'TaxCodeRef': {'value': '2'},
+                            
                           
                         }
                     }
