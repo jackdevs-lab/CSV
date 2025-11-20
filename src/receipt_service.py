@@ -33,6 +33,11 @@ class ReceiptService:
             'CustomerRef': {'value': str(customer_id)},
             'TxnDate': service_date,
             'Line': lines,
+            'DocNumber': str(group['Invoice No.'].iloc[0]),          # ← you wanted this
+            'TxnTaxDetail': {                                        # ← ADD THIS BLOCK
+                'TotalTax': 0,
+                'TaxCodeRef': {'value': '2'}                         # ← non-taxable code
+            }
                                # Undeposited Funds
             
         }
