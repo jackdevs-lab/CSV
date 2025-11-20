@@ -9,44 +9,48 @@ logger = setup_logger(__name__)
 class ReceiptService:
     """Handles sales receipt creation in QuickBooks"""
     
-    def __init__(self, qb_client):
+    def __init__(self, qb_client: QuickBooksClient):
         self.qb_client = qb_client
+
+        # ONE SINGLE SOURCE OF TRUTH — CHANGE THIS ONLY ONCE
+        # Find this number once (see instructions below) and put it here forever
+        self.CASH_PAYMENT_METHOD_ID = "52"   # ←←← CHANGE THIS TO YOUR REAL "Cash" ID
+
+        # Optional: keep the old auto-create logic as fallback (very safe)
         self.payment_method_ids = {}
-    
+
     def create_sales_receipt(self, group, customer_id, lines):
-        """
-        Create a sales receipt in QuickBooks
-        """
         # Extract Service Date from the first row
         service_date = group['Service Date'].iloc[0] if 'Service Date' in group else datetime.now().strftime('%Y-%m-%d')
         if pd.isna(service_date):
             service_date = datetime.now().strftime('%Y-%m-%d')
         elif not isinstance(service_date, str):
-            # Convert to string if it's a datetime object
             service_date = pd.Timestamp(service_date).strftime('%Y-%m-%d')
 
-        payment_method = group.get('Mode of Payment', 'Cash').iloc[0]
-        
+        # IGNORE WHATEVER IS IN THE CSV — ALL SALES RECEIPTS ARE "CASH"
+        # (this is the magic line
         receipt_data = {
             'CustomerRef': {'value': str(customer_id)},
             'TxnDate': service_date,
             'Line': lines,
-            'PaymentMethodRef': {'value': str(self._get_payment_method_ref(payment_method))},
-            'DepositToAccountRef': {'value': '78'},  # Undeposited Funds
+            'PaymentMethodRef': {'value': self.CASH_PAYMENT_METHOD_ID},   # always Cash
+            'DepositToAccountRef': {'value': '78'},                      # Undeposited Funds
             'TxnTaxDetail': {
-                'TaxCodeRef': {'value': '2'}
+                'TaxCodeRef': {'value': '2'}   # or 'NON' if you are tax-exempt
             }
         }
 
-
-        
         logger.debug(f"Creating sales receipt with data: {json.dumps(receipt_data, indent=2)}")
         response = self.qb_client.create_sales_receipt(receipt_data)
         receipt_id = response['SalesReceipt']['Id']
-        
         logger.info(f"Created sales receipt {receipt_id} for customer {customer_id}")
         return response
-    
+
+    # ------------------------------------------------------------------
+    # You can completely delete or comment out the old _get_payment_method_ref
+    # if you want — we don't use it anymore for Sales Receipts
+    # ------------------------------------------------------------------
+    # def _get_payment_method_ref(self, payment_method): ...
     def _get_payment_method_ref(self, payment_method):
         """Get or create QuickBooks payment method ID."""
         pm_lower = payment_method.lower().strip()
