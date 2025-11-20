@@ -35,9 +35,7 @@ class ReceiptService:
             'Line': lines,
             'PaymentMethodRef': {'value': self.CASH_PAYMENT_METHOD_ID},   # always Cash
             'DepositToAccountRef': {'value': '78'},                      # Undeposited Funds
-            'TxnTaxDetail': {
-                'TaxCodeRef': {'value': '2'}   # or 'NON' if you are tax-exempt
-            }
+            
         }
 
         logger.debug(f"Creating sales receipt with data: {json.dumps(receipt_data, indent=2)}")

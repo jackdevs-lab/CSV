@@ -30,9 +30,7 @@ class InvoiceService:
             "TxnDate": service_date,
             "Line": lines,  # ensure each line has TaxCodeRef inside SalesItemLineDetail
             "CustomerMemo": {"value": f"Medical service for {patient_name}"},
-            "TxnTaxDetail": {
-                "TaxCodeRef": {"value": "2"}  # Non-taxable
-            }
+            
         }
 
         
