@@ -119,9 +119,10 @@ def process_csv_file(file_path):
                             'ItemRef': {'value': str(item_id)},
                             'Qty': 1.0,
                             'UnitPrice': float(unit_price),
-                            'TaxCodeRef': {'value': '2'}
+                            'TaxCodeRef': {'value': '2'},
+                             'Description': full_desc
                         },
-                        'Description': full_desc
+                       
                     }
 
                 else:
@@ -135,9 +136,10 @@ def process_csv_file(file_path):
                             'ItemRef': {'value': str(item_id)},
                             'Qty': float(qty_to_send),
                             'UnitPrice': float(unit_price),
-                            'TaxCodeRef': {'value': '2'}  # Non-taxable
+                            'TaxCodeRef': {'value': '2'},
+                             'Description': description # Non-taxable
                         },
-                        'Description': description
+                        
                     }
 
                 lines.append(line)
