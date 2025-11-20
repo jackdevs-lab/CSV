@@ -115,15 +115,15 @@ def process_csv_file(file_path):
                     line = {
                         'DetailType': 'SalesItemLineDetail',
                         'Amount': float(unit_price),
+                        'Description': full_desc,
                         'SalesItemLineDetail': {
                             'ItemRef': {'value': str(item_id)},
                             'Qty': 1.0,
                             'UnitPrice': float(unit_price),
-                            'TaxCodeRef': {'value': '2'},
-                             'Description': full_desc
-                        },
-                       
+                            'TaxCodeRef': {'value': '2'}
+                        }
                     }
+
 
                 else:
                     qty_to_send = float(qty_csv) if qty_csv > 0 else 1.0
@@ -132,15 +132,15 @@ def process_csv_file(file_path):
                     line = {
                         'DetailType': 'SalesItemLineDetail',
                         'Amount': float(amount),
+                        'Description': description,
                         'SalesItemLineDetail': {
                             'ItemRef': {'value': str(item_id)},
                             'Qty': float(qty_to_send),
                             'UnitPrice': float(unit_price),
-                            'TaxCodeRef': {'value': '2'},
-                             'Description': description # Non-taxable
-                        },
-                        
+                            'TaxCodeRef': {'value': '2'}
+                        }
                     }
+
 
                 lines.append(line)
             return lines
