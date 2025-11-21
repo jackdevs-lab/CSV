@@ -127,7 +127,11 @@ def process_csv_file(file_path):
                         'DetailType': 'SalesItemLineDetail',
                         'Amount': float(unit_price),
                         'Description': full_desc,
-                        'SalesItemLineDetail': sales_item_detail
+                        'SalesItemLineDetail': sales_item_detail,
+                        "TxnTaxDetail": {
+                        "TxnTaxCodeRef": {"value": "2"},   # ← ADD THIS
+                        "TotalTax": 0
+                    }
                     }
 
                 else:
@@ -146,7 +150,11 @@ def process_csv_file(file_path):
                         'DetailType': 'SalesItemLineDetail',
                         'Amount': amount,
                         'Description': description,
-                        'SalesItemLineDetail': sales_item_detail
+                        'SalesItemLineDetail': sales_item_detail,
+                                        "TxnTaxDetail": {
+                        "TxnTaxCodeRef": {"value": "2"},   # ← ADD THIS
+                        "TotalTax": 0
+                    }
                     }
 
                 lines.append(line)

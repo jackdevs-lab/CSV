@@ -26,13 +26,16 @@ class InvoiceService:
         patient_name = group['Patient Name'].iloc[0]
         
         invoice_data = {
-            "CustomerRef": {"value": str(customer_id)},
-            "TxnDate": service_date,
-            "Line": lines,
-            "DocNumber": str(group['Invoice No.'].iloc[0]),  # ensure each line has TaxCodeRef inside SalesItemLineDetail
-            "CustomerMemo": {"value": f"Medical service for {patient_name}"}
-            
+        "CustomerRef": {"value": str(customer_id)},
+        "TxnDate": service_date,
+        "Line": lines,   # make sure each line has TaxCodeRef as shown above
+        "DocNumber": str(group['Invoice No.'].iloc[0]),
+        "CustomerMemo": {"value": f"Medical service for {patient_name}"},
+        "TxnTaxDetail": {
+            "TxnTaxCodeRef": {"value": "2"},   # ← ADD THIS
+            "TotalTax": 0
         }
+    }
 
         
         logger.debug(f"Creating invoice with data: {json.dumps(invoice_data, indent=2)}")
