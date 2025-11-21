@@ -36,7 +36,7 @@ class ReceiptService:
         "DocNumber": str(group['Invoice No.'].iloc[0]),
         "Line": lines,
         "TxnTaxDetail": {
-        "TaxCodeRef": {"value": "NON"},   # ← NEW: this is the fix
+        "TaxCodeRef": {"value": "1"},   # ← NEW: this is the fix
         "TotalTax": 0
     }
        
