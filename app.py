@@ -121,6 +121,7 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': 1.0,
                         'UnitPrice': float(unit_price),
+                         "TaxCodeRef": { "value": "2" }
                     })
 
                     line = {
@@ -128,10 +129,7 @@ def process_csv_file(file_path):
                         'Amount': float(unit_price),
                         'Description': full_desc,
                         'SalesItemLineDetail': sales_item_detail,
-                        "TxnTaxDetail": {
-                        "TxnTaxCodeRef": {"value": "2"},   # ← ADD THIS
-                        "TotalTax": 0
-                    }
+                       
                     }
 
                 else:
@@ -143,7 +141,8 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': qty_to_send,
                         'UnitPrice': unit_price,
-                        # DO NOT ADD TaxCodeRef HERE ←←← THIS IS THE FIX
+                        'TaxCodeRef': {'value': '2'}
+                       
                     })
 
                     line = {
@@ -151,11 +150,9 @@ def process_csv_file(file_path):
                         'Amount': amount,
                         'Description': description,
                         'SalesItemLineDetail': sales_item_detail,
-                                        "TxnTaxDetail": {
-                        "TxnTaxCodeRef": {"value": "2"},   # ← ADD THIS
-                        "TotalTax": 0
+                       
                     }
-                    }
+                    
 
                 lines.append(line)
             return lines
