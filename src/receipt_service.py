@@ -31,11 +31,14 @@ class ReceiptService:
         # (this is the magic line
         # In receipt_service.py → for SalesReceipt only
         receipt_data = {
-            'CustomerRef': {'value': str(customer_id)},
-            'TxnDate': service_date,
-            'Line': lines,  # ← NO TaxCodeRef on any line (you already fixed this)
-            'DocNumber': str(group['Invoice No.'].iloc[0]),
+        "CustomerRef": {"value": str(customer_id)},
+        "TxnDate": service_date,
+        "DocNumber": str(group['Invoice No.'].iloc[0]),
+        "Line": lines,
+        "TxnTaxDetail": {
+            "TxnTaxCodeRef": {"value": "NON"}
         }
+    }
 
         logger.debug(f"Creating sales receipt with data: {json.dumps(receipt_data, indent=2)}")
         response = self.qb_client.create_sales_receipt(receipt_data)
