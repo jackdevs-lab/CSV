@@ -29,16 +29,17 @@ class ReceiptService:
 
         # IGNORE WHATEVER IS IN THE CSV — ALL SALES RECEIPTS ARE "CASH"
         # (this is the magic line
+        # In receipt_service.py → for SalesReceipt only
         receipt_data = {
             'CustomerRef': {'value': str(customer_id)},
             'TxnDate': service_date,
-            'Line': lines,
-            'DocNumber': str(group['Invoice No.'].iloc[0]),          # ← you wanted this
-            'TxnTaxDetail': {                                        # ← ADD THIS BLOCK
-                'TotalTax': 0
+            'Line': lines,  # ← NO TaxCodeRef on any line (you already fixed this)
+            'DocNumber': str(group['Invoice No.'].iloc[0]),
+            'TxnTaxDetail': {
+                'TotalTax': 0,
+                'TxnTaxCodeRef': {'value': '2'},   # ← This is the magic line
+                'TaxLine': []                      # ← This is required
             }
-                               # Undeposited Funds
-            
         }
 
         logger.debug(f"Creating sales receipt with data: {json.dumps(receipt_data, indent=2)}")
