@@ -121,7 +121,7 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': 1.0,
                         'UnitPrice': float(unit_price),
-                        "TaxCodeRef": {"value": "1"}
+                        "TaxCodeRef": {"value": "2"}
                     })
 
                     line = {
@@ -141,7 +141,7 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': qty_to_send,
                         'UnitPrice': unit_price,
-                        "TaxCodeRef": {"value": "1"}
+                        "TaxCodeRef": {"value": "2"}
                        
                     })
 
