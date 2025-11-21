@@ -49,7 +49,7 @@ class CustomerService:
                 "CountrySubDivisionCode": "KE-110",
                 "PostalCode": "00100"
             },
-            "Taxable": False
+            
         }
 
         if customer_type == "insurance":

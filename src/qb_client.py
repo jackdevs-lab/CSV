@@ -21,7 +21,7 @@ class SafeQBDecoder(json.JSONDecoder):
         # Fix known numeric fields that Intuit sometimes returns as null
         numeric_fields = {
             'Id', 'SyncToken', 'Balance', 'BalanceWithJobs', 'TotalAmt',
-            'LineNum', 'Amount', 'Qty', 'UnitPrice', 'Taxable', 'TxnDate'
+            'LineNum', 'Amount', 'Qty', 'UnitPrice',  'TxnDate'
         }
 
         for key in obj:
@@ -175,7 +175,7 @@ class QuickBooksClient:
             "IncomeAccountRef": item_data["IncomeAccountRef"],  # expects {"value": "79"}
             "Description": str(item_data.get("Description", ""))[:4000],
             "Active": True,
-            
+
         }
 
         resp = self._make_request('POST', 'item', payload)
