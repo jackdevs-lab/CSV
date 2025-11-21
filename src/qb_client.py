@@ -43,7 +43,7 @@ class QuickBooksClient:
         self.base_url = {
             "sandbox": "https://sandbox-quickbooks.api.intuit.com",
             "production": "https://quickbooks.api.intuit.com"
-        }.get(os.getenv("QB_ENVIRONMENT", "sandbox").lower())
+        }.get(os.getenv("QB_ENVIRONMENT", "production").lower())
 
         self.realm_id = self.auth.get_realm_id() or os.getenv("QB_REALM_ID")
         if not self.realm_id:
@@ -59,7 +59,11 @@ class QuickBooksClient:
             'Content-Type': 'application/json'
         }
 
-    def _make_request(self, method, endpoint, data=None, params=None):
+    def _make_request(self, method, endpoint, data=None, params=None, raise_on_error=True):
+        """
+        Central HTTP. If raise_on_error=False we do NOT call response.raise_for_status()
+        and we always attempt to parse the response body (useful to read QuickBooks Fault payloads).
+        """
         url = f"{self.base_url}/v3/company/{self.realm_id}/{endpoint}"
         headers = self._get_headers()
 
@@ -67,24 +71,31 @@ class QuickBooksClient:
             response = requests.request(
                 method, url, headers=headers, json=data, params=params, timeout=30
             )
-            logger.debug(f"QB → {method} {url}")
-            response.raise_for_status()
+            logger.debug(f"QB → {method} {url} | status={response.status_code}")
 
-            if not response.content:
-                return {}
+            # Try parse body to dict regardless of HTTP status (use SafeQBDecoder)
+            content = response.content or b"{}"
+            try:
+                parsed = json.loads(content, cls=SafeQBDecoder)
+            except json.JSONDecodeError:
+                parsed = {"raw": response.text}
 
-            # THIS IS THE CRITICAL FIX: use our safe decoder
-            return json.loads(response.content, cls=SafeQBDecoder)
+            if raise_on_error:
+                # Preserve existing behavior for callers that expect an exception
+                response.raise_for_status()
+                return parsed
+
+            # When raise_on_error is False, return parsed dict even if status >= 400
+            if response.status_code >= 400:
+                logger.debug(f"QB non-2xx response (raise_on_error=False): {response.status_code} | body: {parsed}")
+            return parsed
 
         except requests.exceptions.HTTPError as e:
-            error_body = e.response.text
-            logger.error(f"QuickBooks HTTP {e.response.status_code}: {error_body}")
+            # If raise_on_error was True, we will be here — log and re-raise so higher layer sees requests exc
+            logger.error(f"QuickBooks HTTP {e.response.status_code}: {e.response.text}")
             raise
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {e} | Response: {response.text[:500]}")
-            return {}
         except Exception as e:
-            logger.error(f"Request failed: {str(e)}")
+            logger.error(f"Request failed: {str(e)}", exc_info=True)
             raise
 
     # ———————— CUSTOMER METHODS ———————— #
@@ -98,24 +109,31 @@ class QuickBooksClient:
     def create_customer(self, customer_data):
         """
         Create a customer in QuickBooks.
-        Returns the full JSON response (dict) with Customer object on success.
-        Raises RuntimeError with message on validation fault.
+        Behavior:
+          - We call _make_request(..., raise_on_error=False) so we can inspect Fault bodies on 400.
+          - If QuickBooks returns a Fault with Duplicate Name, raise RuntimeError containing 'Duplicate' (existing code expects that).
+          - Otherwise, if successful, return the response dict with "Customer".
         """
-        response = self._make_request('POST', 'customer', customer_data)
-        
-        # response is already a dict because _make_request returns .json()
-        # So DO NOT call .json() again!
-        json_resp = response  # ← THIS IS THE FIX
+        resp = self._make_request('POST', 'customer', data=customer_data, raise_on_error=False)
 
-        if "Fault" in json_resp:
-            error_detail = json_resp["Fault"]["Error"][0].get("Detail", "Unknown error")
-            error_code = json_resp["Fault"]["Error"][0].get("code", "")
-            raise RuntimeError(f"QuickBooks rejected customer creation: {error_detail} (Code: {error_code})")
+        # If QuickBooks returned a Fault => handle specially
+        if isinstance(resp, dict) and "Fault" in resp:
+            err = resp["Fault"]["Error"][0]
+            detail = err.get("Detail", "")
+            code = err.get("code", "")
+            msg = err.get("Message", "") or detail
+            if "Duplicate Name Exists" in msg or str(code) == "6240" or "Duplicate" in detail:
+                # Raise a RuntimeError with 'Duplicate' so CustomerService's existing handler catches it
+                raise RuntimeError(f"Duplicate customer: {msg} (Code: {code})")
+            # Other validation faults should be raised as RuntimeError for caller to log/handle
+            raise RuntimeError(f"QuickBooks rejected customer creation: {msg} (Code: {code})")
 
-        if "Customer" not in json_resp:
-            raise RuntimeError(f"Customer creation succeeded but no Customer object returned: {json_resp}")
+        # If response looks fine, check Customer object
+        if "Customer" not in resp:
+            raise RuntimeError(f"Customer creation succeeded but no Customer object returned: {resp}")
 
-        return json_resp  # ← returns full dict with "Customer": { ... }
+        return resp
+
 
     # ———————— ITEM METHODS ———————— #
     def find_item_by_name(self, name: str):
