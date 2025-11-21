@@ -35,9 +35,6 @@ class ReceiptService:
             'TxnDate': service_date,
             'Line': lines,  # ← NO TaxCodeRef on any line (you already fixed this)
             'DocNumber': str(group['Invoice No.'].iloc[0]),
-           'TxnTaxDetail': {
-        'TaxCodeRef': {'value': 'NON'}
-    }
         }
 
         logger.debug(f"Creating sales receipt with data: {json.dumps(receipt_data, indent=2)}")
