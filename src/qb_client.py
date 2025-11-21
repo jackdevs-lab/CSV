@@ -175,7 +175,7 @@ class QuickBooksClient:
             "IncomeAccountRef": item_data["IncomeAccountRef"],  # expects {"value": "79"}
             "Description": str(item_data.get("Description", ""))[:4000],
             "Active": True,
-            "Taxable": False
+            
         }
 
         resp = self._make_request('POST', 'item', payload)
