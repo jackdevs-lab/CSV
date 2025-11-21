@@ -121,7 +121,6 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': 1.0,
                         'UnitPrice': float(unit_price),
-                        'TaxCodeRef': {'value': '2'},   # OK on Invoice
                     })
 
                     line = {
