@@ -35,8 +35,7 @@ class ReceiptService:
             'Line': lines,
             'DocNumber': str(group['Invoice No.'].iloc[0]),          # ← you wanted this
             'TxnTaxDetail': {                                        # ← ADD THIS BLOCK
-                'TotalTax': 0,
-                'TaxCodeRef': {'value': '2'}                         # ← non-taxable code
+                'TotalTax': 0
             }
                                # Undeposited Funds
             
