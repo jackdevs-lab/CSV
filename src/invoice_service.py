@@ -32,7 +32,7 @@ class InvoiceService:
         "DocNumber": str(group['Invoice No.'].iloc[0]),
         "CustomerMemo": {"value": f"Medical service for {patient_name}"},
         "TxnTaxDetail": {
-            "TxnTaxCodeRef": {"value": "2"},  # ← ADD THIS
+            "TxnTaxCodeRef": {"value": "NON"},  # ← ADD THIS
             "TotalTax": 0
         }
     }

@@ -103,7 +103,6 @@ def process_csv_file(file_path):
                 markup_factor = calculate_markup_factor(row)
                 description = str(row.get('Description', '') or '').strip()
 
-                # Build common SalesItemLineDetail base
                 sales_item_detail = {
                     'ItemRef': {'value': str(item_id)},
                 }
@@ -117,11 +116,10 @@ def process_csv_file(file_path):
                         desc_parts.append(f"Qty: {qty_csv}")
                     full_desc = " | ".join(filter(None, desc_parts))
 
-                    # For Invoice: TaxCodeRef is allowed
                     sales_item_detail.update({
                         'Qty': 1.0,
                         'UnitPrice': float(unit_price),
-                        "TaxCodeRef": {"value": "2"}
+                        "TaxCodeRef": {"value": "NON"}   # ← ZERO VAT
                     })
 
                     line = {
@@ -129,11 +127,9 @@ def process_csv_file(file_path):
                         'Amount': float(unit_price),
                         'Description': full_desc,
                         'SalesItemLineDetail': sales_item_detail,
-                       
                     }
 
                 else:
-                    # === SALES RECEIPT: DO NOT SEND TaxCodeRef AT ALL ===
                     qty_to_send = float(qty_csv) if qty_csv > 0 else 1.0
                     unit_price = float(unit_cost_csv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
                     amount = float((Decimal(str(qty_to_send)) * unit_cost_csv).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
@@ -141,8 +137,7 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': qty_to_send,
                         'UnitPrice': unit_price,
-                        "TaxCodeRef": {"value": "2"}
-                       
+                        "TaxCodeRef": {"value": "NON"}   # ← ZERO VAT
                     })
 
                     line = {
@@ -150,9 +145,7 @@ def process_csv_file(file_path):
                         'Amount': amount,
                         'Description': description,
                         'SalesItemLineDetail': sales_item_detail,
-                       
                     }
-                    
 
                 lines.append(line)
             return lines
