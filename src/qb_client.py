@@ -203,49 +203,7 @@ class QuickBooksClient:
         except Exception as e:
             logger.error(f"QB Query failed: {sql} | Error: {e}", exc_info=True)
             return {'QueryResponse': {}}
-    def list_tax_codes(self):
-        """
-        Debug method – prints all TaxCode IDs and their rates in your company.
-        Run once, check logs, then remove or comment out.
-        """
-        query = "SELECT Id, Name, TaxRateDetail FROM TaxCode WHERE Active = true"
-        logger.info("Fetching all TaxCode entries from QuickBooks...")
-        
-        try:
-            response = self._query_safe(query)
-            tax_codes = response.get('QueryResponse', {}).get('TaxCode', [])
-            
-            if not tax_codes:
-                logger.warning("No TaxCode entries found – this is unusual for a Kenyan VAT company.")
-                return []
-
-            logger.info("=== ACTIVE TAX CODES IN YOUR COMPANY ===")
-            results = []
-            for tc in tax_codes:
-                tax_id = tc.get('Id')
-                name = tc.get('Name', 'No Name')
-                rates = tc.get('TaxRateDetail', {}).get('TaxRateRef', [])
-                
-                # Handle single rate or multiple
-                if isinstance(rates, dict):
-                    rates = [rates]
-                
-                rate_info = []
-                for r in rates:
-                    rate_id = r.get('value')
-                    # We don't have rate % here, but we know 2 = 16% usually
-                    rate_info.append(f"RateRef:{rate_id}")
-                
-                info = f"ID: {tax_id} | Name: {name} | Rates: {', '.join(rate_info)}"
-                logger.info(info)
-                results.append({"Id": tax_id, "Name": name, "RateRefs": rate_info})
-            
-            logger.info("=== END TAX CODES ===")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Failed to query TaxCodes: {e}", exc_info=True)
-            return []
+    
     def query(self, sql: str):
         return self._query_safe(sql)
     def verify_customer_exists(self, customer_id: str, max_retries: int = 10) -> bool:

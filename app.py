@@ -40,18 +40,7 @@ def process_csv_file(file_path):
     try:
         qb_auth = QuickBooksAuth()
         qb_client = QuickBooksClient(qb_auth)
-        logger.info("=== LISTING ALL TAX CODES IN YOUR COMPANY ===")
-        tax_query = "SELECT Id, Name, Active FROM TaxCode"
-        tax_resp = qb_client._make_request('GET', 'query', params={'query': tax_query}, raise_on_error=False)
-        if 'QueryResponse' in tax_resp and 'TaxCode' in tax_resp['QueryResponse']:
-            for tc in tax_resp['QueryResponse']['TaxCode']:
-                tc_id = tc.get('Id')
-                tc_name = tc.get('Name', 'Unknown')
-                active = tc.get('Active', False)
-                logger.info(f"TAX CODE → ID: {tc_id} | Name: {tc_name} | Active: {active}")
-        else:
-            logger.info("No tax codes found or error")
-        logger.info("=== END TAX CODES ===")
+       
         customer_service = CustomerService(qb_client)
         product_service = ProductService(qb_client)
         invoice_service = InvoiceService(qb_client)
@@ -131,7 +120,7 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': 1.0,
                         'UnitPrice': float(unit_price),
-                        "TaxCodeRef": {"value": "NON"}   # ← ZERO VAT
+                        "TaxCodeRef": {"value": "6"}   # ← ZERO VAT
                     })
 
                     line = {
@@ -149,7 +138,7 @@ def process_csv_file(file_path):
                     sales_item_detail.update({
                         'Qty': qty_to_send,
                         'UnitPrice': unit_price,
-                        "TaxCodeRef": {"value": "NON"}   # ← ZERO VAT
+                        "TaxCodeRef": {"value": "6"}   # ← ZERO VAT
                     })
 
                     line = {

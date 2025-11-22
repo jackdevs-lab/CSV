@@ -28,7 +28,7 @@ class ReceiptService:
         "DocNumber": str(group['Invoice No.'].iloc[0]),
         "Line": lines,
         "TxnTaxDetail": {
-       "TxnTaxCodeRef": {"value": "NON"},   
+       "TxnTaxCodeRef": {"value": "6"},   
         "TotalTax": 0
     }
        
