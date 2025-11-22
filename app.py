@@ -178,7 +178,8 @@ def process_csv_file(file_path):
                 logger.info(f"Using Customer ID {customer_id} for invoice {invoice_num}")
 
                 # Small delay to reduce rate limiting (optional but helpful)
-                time.sleep(0.8)
+                delay = max(0.8, 6600.0 / len(grouped))
+                time.sleep(delay)
 
                 transaction_type = mapper.determine_transaction_type(group)
 
