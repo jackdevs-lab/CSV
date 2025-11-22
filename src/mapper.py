@@ -81,82 +81,27 @@ class TransactionMapper:
         self.mappings['customers'][customer_name] = customer_id
         self._save_mappings()
     def map_income_account(self, product_service: str, description: str = "") -> dict:
-            """
-            Maps a transaction line to the correct QuickBooks Income Account (not Item!)
-            Uses exact Product / Service name first → then falls back to Description keywords
-            Returns: {"value": "AccountId", "name": "FullyQualifiedName"}
-            """
-            ps = str(product_service or "").strip()
-            desc = str(description or "").strip().lower()
+        """
+        STRICT EXACT MATCH ONLY — no keywords, no description tricks.
+        If it's not in the map → goes to Other Requests (13) — no exceptions.
+        """
+        ps = str(product_service or "").strip()
 
-            # === 1. EXACT MATCH ON "Product / Service" COLUMN (PRIORITY 1) ===
-            exact_map = {
-                "Pharmacy":   {"value": "73", "name": "Sales Revenue:Pharmacy Income"},
-                "Consultation": {"value": "3", "name": "Sales Revenue:Consultation Income"},
-                "Laboratory": {"value": "1150040042", "name": "Sales Revenue:Lab Tests"},
-                "Counselling": {"value": "1150040041", "name": "Sales Revenue:Counselling"},
-                "Gynaecology and Minor procedures": {"value": "12", "name": "Sales Revenue:Gynaecology and Minor procedures"},
-                "Other Request": {"value": "13", "name": "Sales Revenue:Other Requests"},
-                # Add any future exact ones here
-            }
+        # Normalise only for case and common typos that still mean the same thing
+        norm = ps.lower().replace("&", "and").replace("  ", " ").strip()
 
-            if ps in exact_map:
-                return exact_map[ps]
+        # === STRICT DIRECT MAP — ONLY THESE WILL EVER HIT THEIR ACCOUNTS ===
+        exact_map = {
+            "pharmacy":                                 {"value": "73",        "name": "Sales Revenue:Pharmacy Income"},
+            "consultation":                             {"value": "3",         "name": "Sales Revenue:Consultation Income"},
+            "laboratory":                               {"value": "1150040042","name": "Sales Revenue:Lab Tests"},
+            "counselling":                              {"value": "1150040041","name": "Sales Revenue:Counselling"},
+            "gynaecology and minor procedures":         {"value": "12",        "name": "Sales Revenue:Gynaecology and Minor procedures"},
+            # Add any future exact ones here — nothing else will ever sneak in
+        }
 
-            # === 2. COMMON VARIATIONS / TYPO FIXES ===
-            normalized_ps = ps.replace("&", "and").replace("consult", "Consultation") \
-                            .replace("lab", "Laboratory") \
-                            .replace("gyn", "Gynaecology") \
-                            .strip()
+        if norm in exact_map:
+            return exact_map[norm]
 
-            variation_map = {
-                "Consultation Income": "3",
-                "Consultation income": "3",
-                "consultation": "3",
-                "Lab Tests": "1150040042",
-                "laboratory": "1150040042",
-                "Gynaecology and Minor procedures": "12",
-                "Gynaecology & Minor procedures": "12",
-                "Gyn and Minor procedures": "12",
-                "Other Requests": "13",
-                "Other requests": "13",
-                "Counselling": "1150040041",
-                "Counseling": "1150040041",
-            }
-
-            if normalized_ps in variation_map:
-                acct_id = variation_map[normalized_ps]
-                name_map = {
-                    "3": "Sales Revenue:Consultation Income",
-                    "1150040042": "Sales Revenue:Lab Tests",
-                    "12": "Sales Revenue:Gynaecology and Minor procedures",
-                    "13": "Sales Revenue:Other Requests",
-                    "1150040041": "Sales Revenue:Counselling",
-                }
-                return {"value": acct_id, "name": name_map.get(acct_id, f"Sales Revenue:{normalized_ps}")}
-
-            # === 3. KEYWORD FALLBACK USING DESCRIPTION (only if Product/Service is empty/missing) ===
-            if not ps or ps.lower() in ["", "nan", "none"]:
-                # Pharmacy drugs & consumables
-                if any(k in desc for k in ["pharmacy", "inj", "tab", "caps", "syr", "cream", "suppos", "lotion", "dispense"]):
-                    return {"value": "73", "name": "Sales Revenue:Pharmacy Income"}
-
-                # Gyn procedures
-                if any(k in desc for k in ["iud", "pap smear", "papsmear", "eua", "curretage", "minor procedure", "insertion", "removal"]):
-                    return {"value": "12", "name": "Sales Revenue:Gynaecology and Minor procedures"}
-
-                # Maternity / Theatre / Inpatient
-                if any(k in desc for k in ["delivery", "c-section", "caesarean", "theatre fee", "anesthetist", "pediatrician", "admission", "ward", "nursing care"]):
-                    return {"value": "13", "name": "Sales Revenue:Other Requests"}
-
-                # Ultrasound / Scans / Tests → Lab
-                if any(k in desc for k in ["ultrasound", "scan", "obs ", "pelvic", "fbs", "rbs", "u/a", "fhg", "ogtt", "prolactin", "tvs"]):
-                    return {"value": "1150040042", "name": "Sales Revenue:Lab Tests"}
-
-                # CTG, Histology, Speculum exam, etc.
-                if any(k in desc for k in ["ctg", "histology", "speculum", "eua"]):
-                    return {"value": "13", "name": "Sales Revenue:Other Requests"}
-
-            # === 4. FINAL FALLBACK ===
-            # Safest default → parent Sales Revenue or Other Requests
-            return {"value": "13", "name": "Sales Revenue:Other Requests"}  # Most things end up here anyway
+        # === EVERYTHING ELSE (Other Request, Other Service, blank, etc.) ===
+        return {"value": "13", "name": "Sales Revenue:Other Requests"}
