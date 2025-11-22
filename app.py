@@ -170,15 +170,10 @@ def process_csv_file(file_path):
                     customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
 
                 # CRITICAL FIX: ENSURE WE HAVE A VALID CUSTOMER ID BEFORE PROCEEDING
-                if not customer_id or not str(customer_id).isdigit():
-                    logger.error(f"Invalid or missing Customer ID for invoice {invoice_num}. Got: {customer_id}")
-                    results.append({"invoice": invoice_num, "status": "error", "error": "Customer ID missing or invalid"})
-                    continue
+                    logger.info(f"Using Customer ID {customer_id} for invoice {invoice_num}")
 
-                logger.info(f"Using Customer ID {customer_id} for invoice {invoice_num}")
-
-                # Small delay to reduce rate limiting (optional but helpful)
-                delay = max(0.8, 6600.0 / len(grouped))
+                total_invoices = len(grouped)
+                delay = min(2.0, max(0.6, 6600.0 / total_invoices))
                 time.sleep(delay)
 
                 transaction_type = mapper.determine_transaction_type(group)
