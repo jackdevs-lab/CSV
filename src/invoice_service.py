@@ -15,11 +15,10 @@ class InvoiceService:
         """
         If invoice with same DocNumber exists → append lines
         If not → create new invoice
-        Perfect for in-patients with multi-day charges
         """
         doc_number = str(group['Invoice No.'].iloc[0]).strip()
         
-        # Extract shared data (same as before)
+        # Extract shared data
         service_date = group['Service Date'].iloc[0] if 'Service Date' in group else datetime.now().strftime('%Y-%m-%d')
         if pd.isna(service_date):
             service_date = datetime.now().strftime('%Y-%m-%d')
@@ -28,8 +27,9 @@ class InvoiceService:
 
         patient_name = group['Patient Name'].iloc[0]
 
-        # Step 1: Try to find existing invoice by DocNumber
-        existing = self.qb_client.query(f"SELECT * FROM Invoice WHERE DocNumber = '{doc_number}'")
+        # THE ONLY CHANGE YOU NEED — NO QUOTES AROUND doc_number
+        query = f"SELECT Id, SyncToken, Line FROM Invoice WHERE DocNumber = {doc_number} MAXRESULTS 1"
+        existing = self.qb_client.query(query)
         
         if existing and existing.get("QueryResponse", {}).get("Invoice"):
             invoice = existing["QueryResponse"]["Invoice"][0]
@@ -38,7 +38,6 @@ class InvoiceService:
             
             logger.info(f"Found existing invoice #{doc_number} (ID: {invoice_id}) → appending {len(lines)} line(s)")
 
-            # Get current lines and find next available Id
             current_lines = invoice.get("Line", [])
             max_id = max([int(l.get("Id", 0)) for l in current_lines], default=-1)
             new_lines = []
@@ -48,13 +47,12 @@ class InvoiceService:
                 new_line["DetailType"] = "SalesItemLineDetail"
                 new_lines.append(new_line)
 
-            # Sparse update: only send Id, SyncToken, and new Line list
             update_payload = {
                 "Id": invoice_id,
                 "SyncToken": sync_token,
                 "sparse": True,
                 "Line": current_lines + new_lines,
-                "CustomerMemo": {"value": f"Medical service for {patient_name}"},  # refresh memo if needed
+                "CustomerMemo": {"value": f"Medical service for {patient_name}"},
             }
 
             response = self.qb_client._make_request(
@@ -66,7 +64,6 @@ class InvoiceService:
             return response
 
         else:
-            # Step 2: No invoice exists → create new one (your original logic)
             logger.info(f"No existing invoice #{doc_number} → creating new one")
 
             invoice_data = {
@@ -82,6 +79,5 @@ class InvoiceService:
             }
 
             response = self.qb_client.create_invoice(invoice_data)
-            invoice_id = response['Invoice']['Id']
-            logger.info(f"Created new invoice #{doc_number} (ID: {invoice_id})")
+            logger.info(f"Created new invoice #{doc_number} (ID: {response['Invoice']['Id']})")
             return response
