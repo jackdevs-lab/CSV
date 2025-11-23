@@ -6,6 +6,7 @@ import logging
 from io import StringIO
 import pandas as pd
 import time
+import tempfile
 from decimal import Decimal, ROUND_HALF_UP
 from werkzeug.middleware.proxy_fix import ProxyFix
 
