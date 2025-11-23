@@ -183,7 +183,7 @@ def process_csv_file(file_path):
                     if not lines:
                         logger.warning(f"No valid lines for invoice {invoice_num}")
                         continue
-                    result = invoice_service.create_invoice(group, customer_id, lines)
+                    result = invoice_service.create_or_update_invoice(group, customer_id, lines)
                     logger.info(f"Invoice created → QB ID: {result.get('Id')}")
 
                 elif transaction_type == "sales_receipt":
