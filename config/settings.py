@@ -55,6 +55,8 @@ KNOWN_INSURANCES = [
     'UAP insurance',
     'PACIS INSURANCE',
     'Equity health insurance',
+    'NHIF CIVIL SERVANT',
+    
 
 
 
