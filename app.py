@@ -115,23 +115,57 @@ def process_csv_file(file_path):
             for invoice_num, group in current_chunk:
                 try:
                     mapper = TransactionMapper()
-                    is_insurance = mapper.is_insurance_transaction(group)
-                    customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="insurance" if is_insurance else "patient")
+                    is_insurance = mapper.is_insurance_transaction(group)   # True if "Is Insurance?" = Yes
+
+                    # ———— FIXED INSURANCE LOGIC ————
+                    if is_insurance:
+                        insurance_name = mapper.extract_insurance_name(group)   # pulls from "Mode of Payment"
+                        if insurance_name and insurance_name.strip():
+                            # Bill to insurance company → create INVOICE
+                            customer_id = customer_service.find_or_create_customer(
+                                group,
+                                mapper,
+                                customer_type="insurance",
+                                insurance_name=insurance_name.strip()
+                            )
+                            transaction_type = "invoice"          # ← force invoice
+                            logger.info(f"INSURANCE → INVOICE for '{insurance_name.strip()}' (Invoice #{invoice_num})")
+                        else:
+                            # Insurance flag but no name → fallback to patient as cash patient
+                            customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
+                            transaction_type = "sales_receipt"
+                            logger.info(f"Insurance flag but no name → Sales Receipt for patient (Invoice #{invoice_num})")
+                    else:
+                        # Normal cash / MPESA / etc.
+                        customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
+                        transaction_type = "sales_receipt"
+                        logger.info(f"Cash patient → Sales Receipt (Invoice #{invoice_num})")
+                    # ———————————————
 
                     delay = min(2.0, max(0.6, 6600.0 / total_invoices))
                     time.sleep(delay)
 
-                    transaction_type = mapper.determine_transaction_type(group)
+                    # ←←← DELETE OR COMMENT THE NEXT LINE — it was overriding everything!
+                    # transaction_type = mapper.determine_transaction_type(group)
+
                     lines = build_lines(group, invoice_num, for_invoice=(transaction_type == "invoice"))
-                    if not lines: continue
+                    if not lines:
+                        logger.warning(f"No lines for invoice {invoice_num}")
+                        continue
 
                     if transaction_type == "invoice":
                         result = invoice_service.create_or_update_invoice(group, customer_id, lines)
+                        logger.info(f"Invoice created → QB ID: {result.get('Invoice', {}).get('Id')}")
                     else:
                         result = receipt_service.create_sales_receipt(group, customer_id, lines)
+                        logger.info(f"Sales Receipt created → QB ID: {result.get('SalesReceipt', {}).get('Id')}")
 
-                    logger.info(f"{transaction_type.title()} created → QB ID: {result.get('Id')}")
-                    results.append({"invoice": invoice_num, "status": "success", "transaction_id": result.get("Id"), "type": transaction_type})
+                    results.append({
+                        "invoice": invoice_num,
+                        "status": "success",
+                        "transaction_id": result.get('Invoice', result.get('SalesReceipt', {})).get('Id'),
+                        "type": transaction_type
+                    })
 
                 except Exception as e:
                     logger.error(f"Error on invoice {invoice_num}: {str(e)}", exc_info=True)
