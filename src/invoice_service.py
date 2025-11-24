@@ -28,9 +28,8 @@ class InvoiceService:
         patient_name = group['Patient Name'].iloc[0]
 
         # THE ONLY CHANGE YOU NEED — NO QUOTES AROUND doc_number
-        query = f"SELECT Id, SyncToken, Line FROM Invoice WHERE DocNumber = {doc_number} MAXRESULTS 1"
+        query = f"SELECT Id, SyncToken, Line FROM Invoice WHERE DocNumber = '{doc_number}' MAXRESULTS 1"
         existing = self.qb_client.query(query)
-        
         if existing and existing.get("QueryResponse", {}).get("Invoice"):
             invoice = existing["QueryResponse"]["Invoice"][0]
             invoice_id = invoice["Id"]
