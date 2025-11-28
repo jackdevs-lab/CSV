@@ -1,5 +1,4 @@
-# app.py  ← FINAL FREE VERSION (NO REDIS, NO WORKER, HANDLES 5000+ ROWS)
-from flask import Flask, request, render_template, jsonify, redirect
+from flask import Flask, request, render_template, jsonify, redirect, Response
 from pathlib import Path
 import os
 import logging
@@ -35,7 +34,6 @@ handler = logging.StreamHandler(log_stream)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
-# ←←← CHUNKED VERSION (FREE FOREVER) ←←←
 def process_csv_file(file_path):
     try:
         qb_auth = QuickBooksAuth()
@@ -61,13 +59,14 @@ def process_csv_file(file_path):
         grouped = df.groupby('Invoice No.')
         invoice_groups = list(grouped)
         total_invoices = len(invoice_groups)
-        logger.info(f"Found {total_invoices} unique invoices – starting chunked processing")
+        logger.info(f"Found {total_invoices} unique invoices")
 
         chunk_size = 50
         for chunk_start in range(0, total_invoices, chunk_size):
             chunk_end = min(chunk_start + chunk_size, total_invoices)
-            current_chunk = invoice_groups[chunk_start:chunk_end]
-            logger.info(f"Processing chunk {(chunk_start//chunk_size)+1}: invoices {chunk_start+1}–{chunk_end}")
+            chunk_idx = (chunk_start // chunk_size) + 1
+            total_chunks = (total_invoices + chunk_size - 1) // chunk_size
+            logger.info(f"CHUNK_PROGRESS: {chunk_start+1}-{chunk_end} of {total_invoices} (chunk {chunk_idx}/{total_chunks})")
 
             def parse_money(value):
                 if pd.isna(value): return Decimal('0.00')
@@ -112,41 +111,33 @@ def process_csv_file(file_path):
                     lines.append(line)
                 return lines
 
-            for invoice_num, group in current_chunk:
+            for invoice_num, group in invoice_groups[chunk_start:chunk_end]:
                 try:
                     mapper = TransactionMapper()
-                    is_insurance = mapper.is_insurance_transaction(group)   # True if "Is Insurance?" = Yes
+                    is_insurance = mapper.is_insurance_transaction(group)
 
-                    # ———— FIXED INSURANCE LOGIC ————
                     if is_insurance:
-                        insurance_name = mapper.extract_insurance_name(group)   # pulls from "Mode of Payment"
+                        insurance_name = mapper.extract_insurance_name(group)
                         if insurance_name and insurance_name.strip():
-                            # Bill to insurance company → create INVOICE
                             customer_id = customer_service.find_or_create_customer(
                                 group,
                                 mapper,
                                 customer_type="insurance",
                                 insurance_name=insurance_name.strip()
                             )
-                            transaction_type = "invoice"          # ← force invoice
+                            transaction_type = "invoice"
                             logger.info(f"INSURANCE → INVOICE for '{insurance_name.strip()}' (Invoice #{invoice_num})")
                         else:
-                            # Insurance flag but no name → fallback to patient as cash patient
                             customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
                             transaction_type = "sales_receipt"
                             logger.info(f"Insurance flag but no name → Sales Receipt for patient (Invoice #{invoice_num})")
                     else:
-                        # Normal cash / MPESA / etc.
                         customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
                         transaction_type = "sales_receipt"
                         logger.info(f"Cash patient → Sales Receipt (Invoice #{invoice_num})")
-                    # ———————————————
 
                     delay = min(2.0, max(0.6, 6600.0 / total_invoices))
                     time.sleep(delay)
-
-                    # ←←← DELETE OR COMMENT THE NEXT LINE — it was overriding everything!
-                    # transaction_type = mapper.determine_transaction_type(group)
 
                     lines = build_lines(group, invoice_num, for_invoice=(transaction_type == "invoice"))
                     if not lines:
@@ -171,7 +162,7 @@ def process_csv_file(file_path):
                     logger.error(f"Error on invoice {invoice_num}: {str(e)}", exc_info=True)
                     results.append({"invoice": invoice_num, "status": "error", "error": str(e)})
 
-            logger.info(f"Chunk finished – {chunk_end}/{total_invoices} done")
+            logger.info(f"CHUNK_DONE: {chunk_end}/{total_invoices}")
 
         log_processing_result(file_path, results)
         return True, log_stream.getvalue()
@@ -179,7 +170,6 @@ def process_csv_file(file_path):
     except Exception as e:
         logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
         return False, log_stream.getvalue()
-
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -192,14 +182,37 @@ def upload_file():
 
     with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
         file.save(tmp.name)
-        success, logs = process_csv_file(tmp.name)
-        os.unlink(tmp.name)
+        tmp_path = tmp.name
 
-    return jsonify({
-        'success': success,
-        'message': 'Done!' if success else 'Failed',
-        'logs': logs
-    })
+    log_stream.seek(0)
+    log_stream.truncate(0)
+    logger.info("=== NEW CSV PROCESSING STARTED ===")
+    logger.info(f"Uploaded file: {file.filename}")
+
+    success, _ = process_csv_file(tmp_path)
+
+    if success:
+        logger.info("=== ALL DONE – SUCCESS ===")
+    else:
+        logger.error("=== PROCESSING FAILED ===")
+
+    os.unlink(tmp_path)
+    return jsonify({'success': success})
+
+@app.route('/stream-logs')
+def stream_logs():
+    def generate():
+        last_pos = 0
+        while True:
+            current = log_stream.getvalue()
+            if len(current) > last_pos:
+                new_data = current[last_pos:]
+                for line in new_data.splitlines(True):
+                    if line.strip():
+                        yield f"data: {line.rstrip()}\n\n"
+                last_pos = len(current)
+            time.sleep(0.1)
+    return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/')
 def index(): return render_template('index.html')
@@ -212,7 +225,7 @@ def login():
 
 @app.route('/callback')
 def callback():
-    auth_response_url = request.url  # Full URL QuickBooks redirected to
+    auth_response_url = request.url
 
     if 'error' in request.args:
         error = request.args.get('error')
