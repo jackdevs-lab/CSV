@@ -59,29 +59,17 @@ def process_csv_file(file_path):
         grouped = df.groupby('Invoice No.')
         invoice_groups = list(grouped)
         total_invoices = len(invoice_groups)
-        logger.info(f"Found {total_invoices} unique invoices")
+        logger.info(f"Found {total_invoices} unique invoices – starting chunked processing")
 
         chunk_size = 50
         for chunk_start in range(0, total_invoices, chunk_size):
             chunk_end = min(chunk_start + chunk_size, total_invoices)
-            chunk_idx = (chunk_start // chunk_size) + 1
-            total_chunks = (total_invoices + chunk_size - 1) // chunk_size
-            logger.info(f"CHUNK_PROGRESS: {chunk_start+1}-{chunk_end} of {total_invoices} (chunk {chunk_idx}/{total_chunks})")
+            logger.info(f"CHUNK_PROGRESS: {chunk_start+1}-{chunk_end} of {total_invoices}")
 
             def parse_money(value):
                 if pd.isna(value): return Decimal('0.00')
                 s = ''.join(c for c in str(value).strip() if c in '0123456789.-')
                 return Decimal(s) if s and s not in {'.', '-'} else Decimal('0.00')
-
-            def calculate_markup_factor(row):
-                try:
-                    qty = Decimal(str(row['Quantity']))
-                    unit_cost = parse_money(row['Unit Cost'])
-                    total_amount = parse_money(row['Total Amount'])
-                    if qty <= 0 or unit_cost <= 0 or total_amount <= 0: return Decimal('1.0')
-                    factor = total_amount / (unit_cost * qty)
-                    return factor.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
-                except: return Decimal('1.0')
 
             def build_lines(group, invoice_num, for_invoice=False):
                 lines = []
@@ -120,10 +108,7 @@ def process_csv_file(file_path):
                         insurance_name = mapper.extract_insurance_name(group)
                         if insurance_name and insurance_name.strip():
                             customer_id = customer_service.find_or_create_customer(
-                                group,
-                                mapper,
-                                customer_type="insurance",
-                                insurance_name=insurance_name.strip()
+                                group, mapper, customer_type="insurance", insurance_name=insurance_name.strip()
                             )
                             transaction_type = "invoice"
                             logger.info(f"INSURANCE → INVOICE for '{insurance_name.strip()}' (Invoice #{invoice_num})")
@@ -171,6 +156,7 @@ def process_csv_file(file_path):
         logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
         return False, log_stream.getvalue()
 
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -184,20 +170,22 @@ def upload_file():
         file.save(tmp.name)
         tmp_path = tmp.name
 
+    # CLEAR LOGS FOR NEW SESSION
     log_stream.seek(0)
     log_stream.truncate(0)
-    logger.info("=== NEW CSV PROCESSING STARTED ===")
-    logger.info(f"Uploaded file: {file.filename}")
+    logger.info("=== NEW CSV UPLOAD STARTED ===")
+    logger.info(f"File: {file.filename}")
 
-    success, _ = process_csv_file(tmp_path)
+    success, logs = process_csv_file(tmp_path)
 
     if success:
-        logger.info("=== ALL DONE – SUCCESS ===")
+        logger.info("=== ALL INVOICES PROCESSED SUCCESSFULLY ===")
     else:
         logger.error("=== PROCESSING FAILED ===")
 
     os.unlink(tmp_path)
     return jsonify({'success': success})
+
 
 @app.route('/stream-logs')
 def stream_logs():
@@ -214,8 +202,10 @@ def stream_logs():
             time.sleep(0.1)
     return Response(generate(), mimetype='text/event-stream')
 
+
 @app.route('/')
-def index(): return render_template('index.html')
+def index():
+    return render_template('index.html')
 
 @app.route('/login')
 def login():
@@ -226,7 +216,6 @@ def login():
 @app.route('/callback')
 def callback():
     auth_response_url = request.url
-
     if 'error' in request.args:
         error = request.args.get('error')
         description = request.args.get('error_description', '')
@@ -236,10 +225,8 @@ def callback():
         return "Missing authorization code from QuickBooks", 400
 
     auth = QuickBooksAuth()
-
     try:
         tokens = auth.fetch_tokens(auth_response_url)
-
         realm_id = tokens.get("realmId")
         logger.info("OAuth2 flow completed successfully!")
         logger.info(f"Company ID (realmId): {realm_id}")
@@ -262,7 +249,8 @@ def callback():
 
 @app.errorhandler(404)
 def not_found(e):
-    if request.path.startswith('/static/'): return "Not found", 404
+    if request.path.startswith('/static/'):
+        return "Not found", 404
     return render_template('index.html'), 200
 
 if __name__ == '__main__':
