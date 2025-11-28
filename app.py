@@ -173,8 +173,22 @@ def process_csv_file(file_path):
 
             logger.info(f"Chunk finished – {chunk_end}/{total_invoices} done")
 
+        all_logs = log_stream.getvalue()
+        wanted_lines = []
+        for line in all_logs.splitlines():
+            if any(phrase in line for phrase in [
+                "Successfully parsed CSV with",
+                "Found ", "unique invoices",
+                "Processing chunk",
+                "Chunk finished",
+                "Successfully processed"
+            ]):
+                wanted_lines.append(line.split(" - ", 2)[-1] if " - " in line else line)
+
+        clean_ui_log = "\n".join(wanted_lines) if wanted_lines else "Processing completed."
+
         log_processing_result(file_path, results)
-        return True, log_stream.getvalue()
+        return True, clean_ui_log
 
     except Exception as e:
         logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
@@ -192,8 +206,13 @@ def upload_file():
 
     with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
         file.save(tmp.name)
-        success, logs = process_csv_file(tmp.name)
-        os.unlink(tmp.name)
+        try:
+            success, logs = process_csv_file(tmp.name)
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except FileNotFoundError:
+                pass
 
     return jsonify({
         'success': success,
