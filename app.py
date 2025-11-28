@@ -175,20 +175,27 @@ def process_csv_file(file_path):
 
         all_logs = log_stream.getvalue()
         wanted_lines = []
+        has_real_error = False
+
         for line in all_logs.splitlines():
+            if "Failed to refresh QuickBooks token" in line or "400 Client Error" in line:
+                has_real_error = True
             if any(phrase in line for phrase in [
                 "Successfully parsed CSV with",
                 "Found ", "unique invoices",
                 "Processing chunk",
-                "Chunk finished",
-                "Successfully processed"
+                "Chunk finished"
             ]):
-                wanted_lines.append(line.split(" - ", 2)[-1] if " - " in line else line)
+                clean_line = line.split(" - ", 2)[-1] if " - " in line else line
+                wanted_lines.append(clean_line)
 
-        clean_ui_log = "\n".join(wanted_lines) if wanted_lines else "Processing completed."
+        if has_real_error:
+            ui_log = "\n".join(wanted_lines) + "\n\nFailed: QuickBooks connection lost\nReconnect your account and try again"
+        else:
+            ui_log = "\n".join(wanted_lines) + "\n\nAll invoices processed successfully!"
 
         log_processing_result(file_path, results)
-        return True, clean_ui_log
+        return not has_real_error, ui_log
 
     except Exception as e:
         logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
