@@ -86,30 +86,59 @@ def process_csv_file(file_path):
 
             def build_lines(group, invoice_num, for_invoice=False):
                 lines = []
+                inventory_adjustments = []  # Collect pharmacy lines that need real qty deduction
+
                 for _, row in group.iterrows():
                     item_id = product_service.find_or_create_product(row, invoice_num)
-                    total_amount_csv = parse_money(row['Total Amount'])
-                    if total_amount_csv <= 0: continue
-
+                    
                     qty_csv = Decimal(str(row['Quantity'] or '1'))
+                    total_amount_csv = parse_money(row['Total Amount'])
+                    unit_cost = parse_money(row['Unit Cost'])
                     description = str(row.get('Description', '') or '').strip()
 
-                    sales_item_detail = {'ItemRef': {'value': str(item_id)}}
+                    if total_amount_csv <= 0:
+                        continue
 
+                    # ——————— BUILD THE VISIBLE LINE EXACTLY AS YOU WANT ———————
                     if for_invoice:
-                        unit_price = float(total_amount_csv.quantize(Decimal('0.01'), ROUND_HALF_UP))
-                        desc_parts = [description] if description else []
-                        if qty_csv != 1: desc_parts.append(f"Qty: {qty_csv}")
-                        full_desc = " | ".join(filter(None, desc_parts))
-                        sales_item_detail.update({'Qty': 1.0, 'UnitPrice': unit_price, "TaxCodeRef": {"value": "6"}})
-                        line = {'DetailType': 'SalesItemLineDetail', 'Amount': unit_price, 'Description': full_desc, 'SalesItemLineDetail': sales_item_detail}
+                        # INSURANCE: always Qty=1, UnitPrice = total from CSV (810, 607.50, etc.)
+                        qty_to_show = 1.0
+                        unit_price = float(total_amount_csv)
+                        amount = float(total_amount_csv.quantize(Decimal('0.01')))
                     else:
-                        qty_to_send = float(qty_csv) if qty_csv > 0 else 1.0
-                        unit_price = float(parse_money(row['Unit Cost']).quantize(Decimal('0.01'), ROUND_HALF_UP))
-                        amount = float((Decimal(str(qty_to_send)) * parse_money(row['Unit Cost'])).quantize(Decimal('0.01'), ROUND_HALF_UP))
-                        sales_item_detail.update({'Qty': qty_to_send, 'UnitPrice': unit_price, "TaxCodeRef": {"value": "6"}})
-                        line = {'DetailType': 'SalesItemLineDetail', 'Amount': amount, 'Description': description, 'SalesItemLineDetail': sales_item_detail}
+                        # CASH: real qty and real unit cost
+                        qty_to_show = float(qty_csv) if qty_csv > 0 else 1.0
+                        unit_price = float(unit_cost.quantize(Decimal('0.01')))
+                        amount = float((qty_csv * unit_cost).quantize(Decimal('0.01')))
+
+                    sales_item_detail = {
+                        "ItemRef": {"value": str(item_id)},
+                        "Qty": qty_to_show,
+                        "UnitPrice": unit_price,
+                        "TaxCodeRef": {"value": "6"}
+                    }
+
+                    line = {
+                        "DetailType": "SalesItemLineDetail",
+                        "Amount": amount,
+                        "Description": description,
+                        "SalesItemLineDetail": sales_item_detail
+                    }
                     lines.append(line)
+
+                    # ——————— IF PHARMACY + INSURANCE → REMEMBER TO DEDUCT REAL QTY LATER ———————
+                    if for_invoice and product_service.is_pharmacy_item(row) and qty_csv > 1:
+                        inventory_adjustments.append({
+                            "item_id": item_id,
+                            "real_qty": int(qty_csv),
+                            "description": description
+                        })
+
+                # ——————— AFTER TRANSACTION IS CREATED → DEDUCT REAL STOCK FOR INSURANCE PHARMACY ITEMS ———————
+                if inventory_adjustments and for_invoice:
+                    # We do this in invoice_service.create_or_update_invoice() — see step 3 below
+                    group._inventory_adjustments = inventory_adjustments  # monkey-patch the group
+
                 return lines
 
             for invoice_num, group in current_chunk:

@@ -164,28 +164,29 @@ class QuickBooksClient:
                 return self.find_payment_method_by_name(sanitized)
             raise
     def create_item(self, item_data: dict):
-        """
-        Create a Service item in QuickBooks Online.
-        Tested and working on Kenyan + global companies (2025).
-        """
         payload = {
-            "Name": str(item_data["Name"])[:100],
-            "Type": "Service",
-            "UnitPrice": 0,
-            "IncomeAccountRef": item_data["IncomeAccountRef"],  # expects {"value": "79"}
-            "Description": str(item_data.get("Description", ""))[:4000],
+            "Name": item_data["Name"][:100],
+            "Type": item_data.get("Type", "Service"),
+            "UnitPrice": item_data.get("UnitPrice", 0),
+            "IncomeAccountRef": item_data["IncomeAccountRef"],
+            "Description": item_data.get("Description", "")[:4000],
             "Active": True,
-
+            "TrackQtyOnHand": item_data.get("TrackQtyOnHand", False),
         }
+
+        # Add these only if it's an Inventory item
+        if item_data.get("Type") == "Inventory":
+            payload.update({
+                "QtyOnHand": item_data.get("QtyOnHand", 0),
+                "InvStartDate": item_data.get("InvStartDate", "2025-01-01"),
+                "AssetAccountRef": item_data.get("AssetAccountRef", {"value": "11"}),    # Inventory Asset
+                "ExpenseAccountRef": item_data.get("ExpenseAccountRef", {"value": "51"}), # COGS
+            })
 
         resp = self._make_request('POST', 'item', payload)
 
-        if "Fault" in resp:
-            err = resp["Fault"]["Error"][0]
-            raise RuntimeError(f"Item creation failed ({err.get('code')}): {err.get('Detail')}")
-
         if "Item" not in resp:
-            raise RuntimeError(f"Item created but no 'Item' object returned: {resp}")
+            raise RuntimeError(f"Item created but no 'Item' object: {resp}")
 
         return resp
     # ———————— INVOICE / SALES RECEIPT ———————— #

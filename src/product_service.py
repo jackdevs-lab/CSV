@@ -88,3 +88,7 @@ class ProductService:
                 time.sleep(wait)
 
         return None
+    def is_pharmacy_item(self, row):
+        product = str(row.get('Product / Service') or '').strip().lower()
+        description = str(row.get('Description') or '').strip().lower()
+        return product == "pharmacy" or "pharmacy" in description
