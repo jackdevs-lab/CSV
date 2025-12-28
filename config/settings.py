@@ -62,6 +62,31 @@ KNOWN_INSURANCES = [
 
 ]
 
+# Mapping for full preset insurance names (based on your QBO presets from the image)
+# Keys are uppercased for matching; values are exact full names to use for lookups/creation
+INSURANCE_FULL_NAMES = {
+    'JUBILEE INSURANCE': 'Jubilee Insurance Ltd',
+    'CIC': 'Cic Insurance Ltd',
+    'BRITAM': 'Britam Insurance Ltd',
+    'MADISON INSURANCE': 'Madison General Insurance Kenya Ltd',
+    'HERITAGE INSURANCE COMPANY LIMITED': 'Heritage Insurance Ltd',
+    'APA': 'APA Insurance Ltd',
+    'AAR INSURANCE': 'AAR Insurance Ltd',
+    'MINET': 'Minet Insurance Ltd',
+    'MUA': 'Mua Insurance Ltd',
+    'CO-OPERATIVE HEALTH INSURANCE': 'Co-operative Insurance Ltd',
+    'BYNO8 INSURANCE': 'Byno8 Insurance Ltd',
+    'KENYA ALLIANCE': 'Kenya Alliance Insurance Ltd',
+    'PACIS INSURANCE': 'Pacis Insurance Ltd',  # Assumed based on common full name; adjust if different
+    'EQUITY HEALTH INSURANCE': 'Equity Insurance Ltd',
+    'NHIF CIVIL SERVANT': 'National Health Insurance Fund',
+    'SHA-SHIF': 'Sha-Shif',  # Add full if preset exists
+    'OLD MUTUAL INSURANCE': 'Old Mutual Insurance Ltd',  # Add full if preset
+    'KENBRIGHT INSURANCE': 'Kenbright Insurance Ltd',  # Add full if preset
+    'UAP INSURANCE': 'UAP Insurance Ltd',  # Add full if preset
+    # Add any missing from KNOWN_INSURANCES with their exact preset full names
+}
+
 # QuickBooks API URLs
 QB_BASE_URL = {
     'sandbox': 'https://sandbox-quickbooks.api.intuit.com',

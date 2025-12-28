@@ -4,6 +4,7 @@ import time
 import re
 from src.logger import setup_logger
 import pandas as pd
+from config import INSURANCE_FULL_NAMES  # Import the new mapping
 
 logger = setup_logger(__name__)
 
@@ -19,7 +20,8 @@ class CustomerService:
         patient_id = str(patient_id_raw).strip() if pd.notna(patient_id_raw) else "UnknownID"
 
         if customer_type == "insurance" and insurance_name:
-            full_display_name = str(insurance_name).strip().title()
+            cleaned_insurance = str(insurance_name).strip().upper()
+            full_display_name = INSURANCE_FULL_NAMES.get(cleaned_insurance, str(insurance_name).strip())  # Use preset full name or fallback
         else:
             full_display_name = f"{patient_name} ID {patient_id}"
 
