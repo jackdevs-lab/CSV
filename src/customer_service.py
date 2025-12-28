@@ -4,7 +4,7 @@ import time
 import re
 from src.logger import setup_logger
 import pandas as pd
-from config import INSURANCE_FULL_NAMES  # Import the new mapping
+from config.settings import INSURANCE_FULL_NAMES  # Import the new mapping
 
 logger = setup_logger(__name__)
 
