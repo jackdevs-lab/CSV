@@ -320,6 +320,7 @@
                 <p style="margin-top: 10px; font-size: 0.9rem; color: #166534;">
                     Secure one-time connection • Required to create invoices
                 </p>
+                <p id="connection-status" style="margin-top: 10px; font-size: 0.9rem;"></p>
             </div>
 
             <!-- UPLOAD FORM -->
@@ -368,6 +369,25 @@
         const logOutput = document.getElementById('log-output');
         const statusBadge = document.getElementById('status-badge');
         const uploadForm = document.getElementById('upload-form');
+        const connectionStatus = document.getElementById('connection-status');
+
+        // Check connection status on load
+        async function checkConnection() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                if (data.connected) {
+                    connectionStatus.innerHTML = '<span style="color: #166534;">✓ Connected</span>';
+                    connectionStatus.style.color = '#166534';
+                } else {
+                    connectionStatus.innerHTML = '<span style="color: #991b1b;">✗ Expired - <a href="/login" style="color: #991b1b; text-decoration: underline;">Reconnect</a></span>';
+                    connectionStatus.style.color = '#991b1b';
+                }
+            } catch (error) {
+                connectionStatus.innerHTML = '<span style="color: #991b1b;">✗ Error checking connection</span>';
+            }
+        }
+        checkConnection();
 
         // Drag and drop functionality
         uploadArea.addEventListener('dragover', (e) => {
