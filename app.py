@@ -256,6 +256,16 @@ def upload_file():
         'logs': logs
     })
 
+@app.route('/status')
+def status():
+    try:
+        auth = QuickBooksAuth()
+        auth.get_valid_access_token()
+        return jsonify({'connected': True})
+    except Exception as e:
+        logger.error(f"Status check failed: {str(e)}")
+        return jsonify({'connected': False})
+
 @app.route('/')
 def index(): return render_template('index.html')
 
