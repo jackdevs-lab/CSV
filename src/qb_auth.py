@@ -2,6 +2,7 @@
 import os
 import time
 import requests
+import json
 from urllib.parse import urlparse, parse_qs
 from src.logger import setup_logger
 
@@ -10,9 +11,9 @@ logger = setup_logger(__name__)
 class QuickBooksAuth:
     """
     Bulletproof QuickBooks OAuth2 handler
-    - Stores ONLY the refresh token in environment
+    - Stores ONLY the refresh token in a persistent file (or env as fallback)
     - Everything else is generated on-the-fly
-    - 100% works on Vercel, local, Docker, etc.
+    - Works on Render with attached disk for persistence
     """
 
     def __init__(self):
@@ -27,19 +28,53 @@ class QuickBooksAuth:
         self.token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
         self.authorization_base_url = "https://appcenter.intuit.com/connect/oauth2"
 
-        # Permanent refresh token from env (this is the ONLY thing you ever store)
-        self.permanent_refresh_token = os.getenv("QB_REFRESH_TOKEN")
+        # Persistent token file (mount a disk on Render at /data and set TOKEN_FILE=/data/tokens.json)
+        self.token_file = os.getenv("TOKEN_FILE", "tokens.json")
+
+        # Create directory if needed (skip if dirname is empty, e.g., file in cwd)
+        dir_path = os.path.dirname(self.token_file)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+
+        # Load refresh token from file if available, else from env
+        self.permanent_refresh_token = self._get_stored_value("qb_refresh_token") or os.getenv("QB_REFRESH_TOKEN")
         if not self.permanent_refresh_token:
-            raise ValueError("QB_REFRESH_TOKEN not set in environment. Re-authenticate at /login")
+            raise ValueError("QB_REFRESH_TOKEN not set in file or environment. Re-authenticate at /login")
 
         # Runtime tokens (generated from permanent refresh token)
         self._tokens = {
             "access_token": None,
             "refresh_token": self.permanent_refresh_token,
             "expires_at": 0,  # Force first refresh
-            "realmId": os.getenv("QB_REALM_ID")  # Optional: can be in env or from auth
+            "realmId": self._get_stored_value("qb_realm_id") or os.getenv("QB_REALM_ID")  # Optional: can be in env or from auth
         }
         self._lock = False
+
+    def _get_stored_value(self, key):
+        if os.path.exists(self.token_file):
+            try:
+                with open(self.token_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get(key)
+            except Exception as e:
+                logger.error(f"Failed to read token file: {e}")
+        return None
+
+    def _set_stored_value(self, key, value):
+        data = {}
+        if os.path.exists(self.token_file):
+            try:
+                with open(self.token_file, 'r') as f:
+                    data = json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to read token file for update: {e}")
+        data[key] = value
+        try:
+            with open(self.token_file, 'w') as f:
+                json.dump(data, f)
+            logger.info(f"Updated {key} in token file")
+        except Exception as e:
+            logger.error(f"Failed to write token file: {e}")
 
     def _refresh_token_if_needed(self):
         now = time.time()
@@ -75,9 +110,14 @@ class QuickBooksAuth:
 
             expires_in = int(new_tokens.get("expires_in", 3600))
 
+            new_refresh = new_tokens.get("refresh_token")
+            if new_refresh and new_refresh != self._tokens["refresh_token"]:
+                logger.info("New refresh token received - updating storage")
+                self._set_stored_value("qb_refresh_token", new_refresh)
+
             self._tokens.update({
                 "access_token": new_tokens["access_token"],
-                "refresh_token": new_tokens.get("refresh_token", self._tokens["refresh_token"]),
+                "refresh_token": new_refresh or self._tokens["refresh_token"],
                 "expires_at": now + expires_in - 60,
             })
 
@@ -122,11 +162,15 @@ class QuickBooksAuth:
 
         realm_id = parse_qs(urlparse(auth_response_url).query).get("realmId", [None])[0]
 
-        # Update permanent refresh token in environment (you'll do this manually once)
+        # Update permanent refresh token in file (and log for manual verification)
         new_refresh_token = tokens["refresh_token"]
+        self._set_stored_value("qb_refresh_token", new_refresh_token)
+        if realm_id:
+            self._set_stored_value("qb_realm_id", realm_id)
+
         logger.info("NEW REFRESH TOKEN GENERATED!")
         logger.info(f"QB_REFRESH_TOKEN={new_refresh_token}")
-        logger.info("↑↑↑ COPY THIS AND UPDATE IN VERCEL ENVIRONMENT VARIABLES ↑↑↑")
+        logger.info("↑↑↑ COPY THIS AND UPDATE IN RENDER ENVIRONMENT VARIABLES AS BACKUP ↑↑↑")
 
         self._tokens.update({
             "access_token": tokens["access_token"],
