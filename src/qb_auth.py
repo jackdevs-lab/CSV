@@ -122,6 +122,7 @@ class QuickBooksAuth:
             })
 
             logger.info("QuickBooks token refreshed successfully")
+            logger.info(f"Current QuickBooks access token: {self._tokens['access_token']}")
 
         except Exception as e:
             logger.error(f"Failed to refresh QuickBooks token: {e}", exc_info=True)
@@ -185,6 +186,8 @@ class QuickBooksAuth:
             "expires_at": time.time() + tokens["expires_in"] - 60,
             "realmId": realm_id,
         })
+
+        logger.info(f"Current QuickBooks access token: {self._tokens['access_token']}")
 
         if realm_id and not os.getenv("QB_REALM_ID"):
             logger.info(f"QB_REALM_ID={realm_id}")
