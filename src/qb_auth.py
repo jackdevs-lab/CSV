@@ -133,6 +133,13 @@ class QuickBooksAuth:
         self._refresh_token_if_needed()
         return self._tokens["access_token"]
 
+    def log_access_token(self):
+        access_token = self._tokens.get("access_token")
+        if access_token:
+            logger.info(f"Current QuickBooks access token: {access_token}")
+        else:
+            logger.info("No QuickBooks access token has been generated yet.")
+
     def get_realm_id(self):
         return self._tokens.get("realmId")
 
