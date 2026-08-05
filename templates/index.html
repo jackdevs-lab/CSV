@@ -124,7 +124,7 @@
         </div>
     </main>
 
-    <script>
+   <script>
         const uploadArea = document.getElementById('upload-area');
         const fileInput = document.getElementById('csv-file');
         const fileInfo = document.getElementById('file-info');
@@ -165,42 +165,37 @@
 
         document.getElementById('upload-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            const file = fileInput.files[0];
+            if (!file) return;
+
             resultsSection.classList.remove('hidden');
-            logOutput.innerHTML = '<span class="text-yellow-400">Initiating sync sequence...</span><br/>';
+            logOutput.innerHTML = '<span class="text-yellow-400">Initiating sync sequence... uploading to backend...</span><br/>';
             processBtn.disabled = true;
             processBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Processing...';
-            
-            // SIMULATED API RESPONSE FOR DEMONSTRATION
-            setTimeout(() => {
-                logOutput.innerHTML += '<span class="text-white">Validating CSV headers...</span><br/>';
-                logOutput.innerHTML += '<span class="text-green-400">Headers OK. Syncing 145 records to QuickBooks...</span><br/>';
-                logOutput.innerHTML += '<span class="text-red-400">Warning: 2 records dropped during validation.</span><br/>';
-                logOutput.innerHTML += '<span class="text-green-400">Process completed successfully.</span>';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
                 
+                const data = await response.json();
+                
+                if (data.success) {
+                    logOutput.innerHTML += `<span class="text-green-400">${data.logs.replace(/\n/g, '<br/>')}</span>`;
+                } else {
+                    logOutput.innerHTML += `<span class="text-red-400">${data.logs ? data.logs.replace(/\n/g, '<br/>') : data.error}</span>`;
+                }
+            } catch (err) {
+                logOutput.innerHTML += `<span class="text-red-400">Network or server error: ${err.message}</span>`;
+            } finally {
                 processBtn.innerHTML = 'Process and Sync Data';
                 processBtn.disabled = false;
-
-                // Simulate populating the dropped records table
-                renderDroppedRecords([
-                    { row: 14, name: "Britam Insurance Ltd", error: "Duplicate document number" },
-                    { row: 89, name: "Unknown Client", error: "Missing customer ID reference" }
-                ]);
-
-            }, 2000);
+            }
         });
-
-        function renderDroppedRecords(records) {
-            droppedCount.textContent = `${records.length} Failed`;
-            if (records.length === 0) return;
-            
-            droppedRecordsBody.innerHTML = records.map(rec => `
-                <tr class="hover:bg-slate-50 transition-colors">
-                    <td class="px-4 py-3 font-medium text-slate-700">#${rec.row}</td>
-                    <td class="px-4 py-3 text-slate-600">${rec.name}</td>
-                    <td class="px-4 py-3 text-red-600 text-xs font-medium">${rec.error}</td>
-                </tr>
-            `).join('');
-        }
     </script>
 </body>
 </html>
