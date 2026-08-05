@@ -8,6 +8,24 @@ from src.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
+class QuickBooksAuthError(Exception):
+    """
+    Raised when the OAuth2 token exchange fails.
+
+    Attributes:
+        error_code:              Intuit error code (e.g. 'invalid_grant', 'invalid_client')
+        status_code:             HTTP status code from the token endpoint
+        refresh_token_invalid:   True when the refresh token itself is expired/revoked
+                                 and the user must re-authenticate at /login
+    """
+    def __init__(self, message, error_code=None, status_code=None, refresh_token_invalid=False):
+        super().__init__(message)
+        self.error_code = error_code
+        self.status_code = status_code
+        self.refresh_token_invalid = refresh_token_invalid
+
+
 class QuickBooksAuth:
     """
     Bulletproof QuickBooks OAuth2 handler
@@ -102,10 +120,61 @@ class QuickBooksAuth:
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": self._tokens["refresh_token"],
+                    # Also send credentials in the body — Intuit's bearer endpoint
+                    # accepts them here and this resolves spurious 400 requests.
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
                 },
                 timeout=30,
             )
-            response.raise_for_status()
+
+            # Capture the real Intuit error payload instead of a bare 400.
+            if response.status_code >= 400:
+                error_code = None
+                error_desc = response.text
+                try:
+                    payload = response.json()
+                    error_code = payload.get("error")
+                    error_desc = payload.get("error_description") or error_desc
+                except Exception:
+                    pass
+
+                # An expired/revoked refresh token cannot be recovered without re-auth.
+                refresh_token_invalid = error_code in (
+                    "invalid_grant",
+                    "invalid_token",
+                    "token_expired",
+                    "unauthorized_client",
+                )
+
+                logger.error(
+                    "QuickBooks token refresh failed | HTTP %s | error=%s | description=%s",
+                    response.status_code,
+                    error_code,
+                    error_desc,
+                )
+
+                message = (
+                    "QuickBooks OAuth token refresh failed (HTTP {status}). "
+                    "Intuit error: {code} - {desc}".format(
+                        status=response.status_code,
+                        code=error_code or "unknown",
+                        desc=error_desc,
+                    )
+                )
+                if refresh_token_invalid:
+                    message += (
+                        "\nThe stored refresh token is expired or revoked. "
+                        "Re-authenticate at /login to mint a fresh refresh token."
+                    )
+
+                raise QuickBooksAuthError(
+                    message,
+                    error_code=error_code,
+                    status_code=response.status_code,
+                    refresh_token_invalid=refresh_token_invalid,
+                )
+
             new_tokens = response.json()
 
             expires_in = int(new_tokens.get("expires_in", 3600))
