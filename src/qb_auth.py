@@ -110,18 +110,18 @@ class QuickBooksAuth:
         self._lock = True
         try:
             logger.info("Refreshing QuickBooks access token...")
+            # Intuit's bearer token endpoint requires client credentials IN THE BODY.
+            # Do NOT send an HTTP Basic auth header — Intuit rejects it with
+            # {"error":"invalid_client"} (HTTP 401/400).
             response = requests.post(
                 self.token_url,
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
-                auth=(self.client_id, self.client_secret),  # ← THIS IS THE CORRECT WAY
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": self._tokens["refresh_token"],
-                    # Also send credentials in the body — Intuit's bearer endpoint
-                    # accepts them here and this resolves spurious 400 requests.
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
                 },
