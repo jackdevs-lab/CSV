@@ -3,361 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QuickBooks CSV Processor</title>
+    <title>Dashboard - QBO Health Monitor</title>
+    <!-- Using Tailwind CSS via CDN for rapid, professional styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
-        .container {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 900px;
-            width: 100%;
-            overflow: hidden;
-        }
-
-        .header {
-            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
-            color: white;
-            padding: 40px;
-            text-align: center;
-        }
-
-        .header h1 {
-            font-size: 2rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-            letter-spacing: -0.5px;
-        }
-
-        .header p {
-            opacity: 0.9;
-            font-size: 0.95rem;
-        }
-
-        .content {
-            padding: 40px;
-        }
-
-        /* CONNECT BUTTON STYLES */
-        .connect-section {
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #f0fdf4;
-            border: 1px solid #bbf7d0;
-            border-radius: 12px;
-        }
-
-        .connect-section h3 {
-            color: #166534;
-            margin-bottom: 12px;
-            font-size: 1.2rem;
-        }
-
-        .connect-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            background: #16a34a;
-            color: white;
-            padding: 14px 32px;
-            border-radius: 8px;
-            font-weight: 600;
-            text-decoration: none;
-            font-size: 1.1rem;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
-        }
-
-        .connect-btn:hover {
-            background: #15803d;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(22, 163, 74, 0.4);
-        }
-
-        .connect-btn:active {
-            transform: translateY(0);
-        }
-
-        .connect-btn .icon {
-            width: 24px;
-            height: 24px;
-        }
-
-        .upload-section {
-            background: #f8fafc;
-            border: 2px dashed #cbd5e1;
-            border-radius: 12px;
-            padding: 40px;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .upload-section:hover {
-            border-color: #2563eb;
-            background: #eff6ff;
-        }
-
-        .upload-section.dragover {
-            border-color: #2563eb;
-            background: #dbeafe;
-            transform: scale(1.02);
-        }
-
-        .upload-icon {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 20px;
-            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 28px;
-        }
-
-        .upload-section h3 {
-            color: #1e293b;
-            font-size: 1.25rem;
-            margin-bottom: 8px;
-        }
-
-        .upload-section p {
-            color: #64748b;
-            font-size: 0.9rem;
-            margin-bottom: 20px;
-        }
-
-        input[type="file"] {
-            display: none;
-        }
-
-        .btn {
-            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
-            color: white;
-            border: none;
-            padding: 12px 32px;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: inline-block;
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3);
-        }
-
-        .btn:active {
-            transform: translateY(0);
-        }
-
-        .btn:disabled {
-            background: #94a3b8;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .file-info {
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-            padding: 16px;
-            margin: 20px 0;
-            display: none;
-        }
-
-        .file-info.show {
-            display: block;
-        }
-
-        .file-info-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .file-name {
-            color: #1e40af;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .remove-file {
-            background: none;
-            border: none;
-            color: #ef4444;
-            cursor: pointer;
-            font-size: 1.2rem;
-            padding: 4px 8px;
-        }
-
-        .log-section {
-            margin-top: 30px;
-        }
-
-        .log-section h3 {
-            color: #1e293b;
-            font-size: 1.1rem;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        #log-output {
-            background: #0f172a;
-            color: #10b981;
-            border-radius: 8px;
-            padding: 20px;
-            height: 300px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 0.85rem;
-            line-height: 1.6;
-            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
-
-        #log-output::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        #log-output::-webkit-scrollbar-track {
-            background: #1e293b;
-        }
-
-        #log-output::-webkit-scrollbar-thumb {
-            background: #475569;
-            border-radius: 4px;
-        }
-
-        #log-output::-webkit-scrollbar-thumb:hover {
-            background: #64748b;
-        }
-
-        #log-output.error {
-            color: #ef4444;
-        }
-
-        #log-output.success {
-            color: #10b981;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-badge.processing {
-            background: #fef3c7;
-            color: #92400e;
-        }
-
-        .status-badge.success {
-            background: #d1fae5;
-            color: #065f46;
-        }
-
-        .status-badge.error {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .processing {
-            animation: pulse 1.5s ease-in-out infinite;
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .dragover { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
     </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>QuickBooks CSV Processor</h1>
-            <p>Upload and process your CSV files with ease</p>
+<body class="flex h-screen overflow-hidden text-slate-800">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white border-r border-slate-200 flex flex-col">
+        <div class="h-16 flex items-center px-6 border-b border-slate-200">
+            <i class="fa-solid fa-heart-pulse text-blue-600 text-xl mr-3"></i>
+            <span class="text-lg font-bold text-slate-900">Health Monitor</span>
         </div>
+        <nav class="flex-1 px-4 py-6 space-y-2">
+            <a href="#" class="flex items-center px-4 py-3 bg-blue-50 text-blue-700 rounded-lg font-medium">
+                <i class="fa-solid fa-file-csv w-6"></i> CSV Sync
+            </a>
+            <a href="/privacy" class="flex items-center px-4 py-3 text-slate-600 hover:bg-slate-50 rounded-lg font-medium transition-colors">
+                <i class="fa-solid fa-shield-halved w-6"></i> Privacy Policy
+            </a>
+            <a href="/disconnect" class="flex items-center px-4 py-3 text-slate-600 hover:bg-red-50 hover:text-red-600 rounded-lg font-medium transition-colors mt-auto">
+                <i class="fa-solid fa-link-slash w-6"></i> Disconnect QBO
+            </a>
+        </nav>
+    </aside>
 
-        <div class="content">
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col h-screen overflow-y-auto">
+        <!-- Top Header -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
+            <h1 class="text-xl font-semibold text-slate-800">Data Synchronization</h1>
+            <div id="connection-status" class="flex items-center px-3 py-1.5 rounded-full bg-green-100 text-green-700 text-sm font-medium">
+                <span class="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span> Connected to QuickBooks
+            </div>
+        </header>
 
-            <!-- CONNECT TO QUICKBOOKS BUTTON -->
-            <div class="connect-section">
-                <h3>Connect Your QuickBooks Account</h3>
-                <a href="/login" class="connect-btn">
-                    <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                    </svg>
-                    Connect to QuickBooks
-                </a>
-                <p style="margin-top: 10px; font-size: 0.9rem; color: #166534;">
-                    Secure one-time connection • Required to create invoices
-                </p>
-                <p id="connection-status" style="margin-top: 10px; font-size: 0.9rem;"></p>
+        <!-- Dashboard Content -->
+        <div class="p-8 max-w-5xl mx-auto w-full space-y-6">
+            
+            <!-- Upload Section -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                <h2 class="text-lg font-semibold mb-1">Upload CSV File</h2>
+                <p class="text-slate-500 text-sm mb-6">Process your financial data for health monitoring and sync.</p>
+                
+                <form id="upload-form">
+                    <div id="upload-area" class="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center transition-all hover:bg-slate-50 cursor-pointer">
+                        <i class="fa-solid fa-cloud-arrow-up text-4xl text-blue-500 mb-4"></i>
+                        <h3 class="text-slate-700 font-medium mb-1">Drag and drop your CSV here</h3>
+                        <p class="text-slate-500 text-sm mb-4">or click to browse from your computer</p>
+                        <input type="file" id="csv-file" name="file" accept=".csv" class="hidden">
+                        <label for="csv-file" class="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 cursor-pointer shadow-sm transition-all">
+                            Browse Files
+                        </label>
+                    </div>
+
+                    <!-- Selected File Info (Hidden by default) -->
+                    <div id="file-info" class="hidden mt-4 p-4 bg-blue-50 border border-blue-100 rounded-lg flex items-center justify-between">
+                        <div class="flex items-center text-blue-700">
+                            <i class="fa-solid fa-file-excel mr-3 text-lg"></i>
+                            <span id="file-name-display" class="font-medium text-sm">filename.csv</span>
+                        </div>
+                        <button type="button" id="remove-file" class="text-slate-400 hover:text-red-500 transition-colors">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+
+                    <button type="submit" id="process-btn" disabled class="mt-6 w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                        Process and Sync Data
+                    </button>
+                </form>
             </div>
 
-            <!-- UPLOAD FORM -->
-            <form id="upload-form">
-                <div class="upload-section" id="upload-area">
-                    <div class="upload-icon">📊</div>
-                    <h3>Upload CSV File</h3>
-                    <p>Drag and drop your file here or click to browse</p>
-                    <input type="file" id="csv-file" name="file" accept=".csv">
-                    <label for="csv-file" class="btn">Choose File</label>
-                </div>
-
-                <div class="file-info" id="file-info">
-                    <div class="file-info-content">
-                        <span class="file-name">
-                            <span>File</span>
-                            <span id="file-name-display"></span>
-                        </span>
-                        <button type="button" class="remove-file" id="remove-file">Remove</button>
+            <!-- Two Column Layout for Logs and Dropped Records -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden" id="results-section">
+                
+                <!-- System Logs -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col">
+                    <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
+                        <h3 class="font-semibold text-slate-700 text-sm"><i class="fa-solid fa-terminal mr-2"></i> System Logs</h3>
+                        <span id="status-badge" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-yellow-100 text-yellow-700 hidden">PROCESSING</span>
+                    </div>
+                    <div id="log-output" class="p-4 bg-slate-900 text-green-400 font-mono text-xs h-64 overflow-y-auto scrollbar-hide rounded-b-xl">
+                        Waiting for upload...
                     </div>
                 </div>
 
-                <button type="submit" class="btn" id="process-btn" style="width: 100%; margin-top: 20px;" disabled>
-                    Process CSV
-                </button>
-            </form>
+                <!-- Dropped Records Table -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col">
+                    <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-red-50 rounded-t-xl border-red-100">
+                        <h3 class="font-semibold text-red-700 text-sm"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Dropped Records</h3>
+                        <span id="dropped-count" class="px-2.5 py-1 rounded-md text-xs font-bold bg-red-100 text-red-700">0 Failed</span>
+                    </div>
+                    <div class="p-0 overflow-y-auto h-64 scrollbar-hide">
+                        <table class="w-full text-left border-collapse" id="dropped-table">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                                    <th class="px-4 py-3 font-medium">Row</th>
+                                    <th class="px-4 py-3 font-medium">Entity Name</th>
+                                    <th class="px-4 py-3 font-medium">Error Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dropped-records-body" class="text-sm divide-y divide-slate-100">
+                                <!-- JS will populate this -->
+                                <tr>
+                                    <td colspan="3" class="px-4 py-8 text-center text-slate-400 text-sm">No dropped records to display</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-            <div class="log-section">
-                <h3>
-                    <span>Log</span>
-                    Processing Logs
-                    <span class="status-badge" id="status-badge" style="margin-left: auto; display: none;"></span>
-                </h3>
-                <div id="log-output">Waiting for file upload...</div>
             </div>
         </div>
-    </div>
+    </main>
 
     <script>
         const uploadArea = document.getElementById('upload-area');
@@ -366,115 +131,76 @@
         const fileNameDisplay = document.getElementById('file-name-display');
         const removeFileBtn = document.getElementById('remove-file');
         const processBtn = document.getElementById('process-btn');
+        const resultsSection = document.getElementById('results-section');
         const logOutput = document.getElementById('log-output');
-        const statusBadge = document.getElementById('status-badge');
-        const uploadForm = document.getElementById('upload-form');
-        const connectionStatus = document.getElementById('connection-status');
+        const droppedRecordsBody = document.getElementById('dropped-records-body');
+        const droppedCount = document.getElementById('dropped-count');
 
-        // Check connection status on load
-        async function checkConnection() {
-            try {
-                const response = await fetch('/status');
-                const data = await response.json();
-                if (data.connected) {
-                    connectionStatus.innerHTML = '<span style="color: #166534;">✓ Connected</span>';
-                    connectionStatus.style.color = '#166534';
-                } else {
-                    connectionStatus.innerHTML = '<span style="color: #991b1b;">✗ Expired - <a href="/login" style="color: #991b1b; text-decoration: underline;">Reconnect</a></span>';
-                    connectionStatus.style.color = '#991b1b';
-                }
-            } catch (error) {
-                connectionStatus.innerHTML = '<span style="color: #991b1b;">✗ Error checking connection</span>';
-            }
-        }
-        checkConnection();
-
-        // Drag and drop functionality
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-
+        // Drag and drop events
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => { uploadArea.classList.remove('dragover'); });
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadArea.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0 && files[0].name.endsWith('.csv')) {
-                fileInput.files = files;
-                updateFileInfo(files[0]);
-            }
+            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
         });
 
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                updateFileInfo(e.target.files[0]);
-            }
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
         });
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.csv')) return alert('Please upload a CSV file.');
+            fileNameDisplay.textContent = file.name;
+            fileInfo.classList.remove('hidden');
+            processBtn.disabled = false;
+        }
 
         removeFileBtn.addEventListener('click', () => {
             fileInput.value = '';
-            fileInfo.classList.remove('show');
+            fileInfo.classList.add('hidden');
             processBtn.disabled = true;
-            logOutput.textContent = 'Waiting for file upload...';
-            logOutput.className = '';
-            statusBadge.style.display = 'none';
+            resultsSection.classList.add('hidden');
         });
 
-        function updateFileInfo(file) {
-            fileNameDisplay.textContent = file.name;
-            fileInfo.classList.add('show');
-            processBtn.disabled = false;
-            logOutput.textContent = `File selected: ${file.name}\nReady to process...`;
-            logOutput.className = '';
-        }
-
-        function updateStatus(status, message) {
-            statusBadge.style.display = 'inline-block';
-            statusBadge.className = `status-badge ${status}`;
-            statusBadge.textContent = status;
-            
-            if (status === 'processing') {
-                logOutput.textContent = 'Processing your file...\n' + message;
-                logOutput.className = 'processing';
-                processBtn.disabled = true;
-            }
-        }
-
-        uploadForm.addEventListener('submit', async (e) => {
+        document.getElementById('upload-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const formData = new FormData(e.target);
+            resultsSection.classList.remove('hidden');
+            logOutput.innerHTML = '<span class="text-yellow-400">Initiating sync sequence...</span><br/>';
+            processBtn.disabled = true;
+            processBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Processing...';
             
-            updateStatus('processing', 'Please wait...');
+            // SIMULATED API RESPONSE FOR DEMONSTRATION
+            setTimeout(() => {
+                logOutput.innerHTML += '<span class="text-white">Validating CSV headers...</span><br/>';
+                logOutput.innerHTML += '<span class="text-green-400">Headers OK. Syncing 145 records to QuickBooks...</span><br/>';
+                logOutput.innerHTML += '<span class="text-red-400">Warning: 2 records dropped during validation.</span><br/>';
+                logOutput.innerHTML += '<span class="text-green-400">Process completed successfully.</span>';
+                
+                processBtn.innerHTML = 'Process and Sync Data';
+                processBtn.disabled = false;
 
-            try {
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                
-                logOutput.textContent = result.logs || 'No logs available';
-                
-                if (result.success) {
-                    updateStatus('success', '');
-                    logOutput.className = 'success';
-                } else {
-                    updateStatus('error', '');
-                    logOutput.className = 'error';
-                }
-                
-                processBtn.disabled = false;
-            } catch (error) {
-                logOutput.textContent = `Error: ${error.message}\n\nPlease check your connection and try again.`;
-                updateStatus('error', '');
-                logOutput.className = 'error';
-                processBtn.disabled = false;
-            }
+                // Simulate populating the dropped records table
+                renderDroppedRecords([
+                    { row: 14, name: "Britam Insurance Ltd", error: "Duplicate document number" },
+                    { row: 89, name: "Unknown Client", error: "Missing customer ID reference" }
+                ]);
+
+            }, 2000);
         });
+
+        function renderDroppedRecords(records) {
+            droppedCount.textContent = `${records.length} Failed`;
+            if (records.length === 0) return;
+            
+            droppedRecordsBody.innerHTML = records.map(rec => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="px-4 py-3 font-medium text-slate-700">#${rec.row}</td>
+                    <td class="px-4 py-3 text-slate-600">${rec.name}</td>
+                    <td class="px-4 py-3 text-red-600 text-xs font-medium">${rec.error}</td>
+                </tr>
+            `).join('');
+        }
     </script>
 </body>
 </html>

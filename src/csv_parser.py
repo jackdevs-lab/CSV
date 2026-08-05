@@ -82,12 +82,46 @@ class CSVParser:
             logger.warning(f"Failed to parse money: '{value}' → using 0.00")
             return Decimal('0.00')
 
+    def _normalize_bundled_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Splits comma-separated bundled services into individual rows.
+        Strictly uses existing names from the CSV with no assumed normalization.
+        The first item retains the invoice total; subsequent items are $0.00.
+        """
+        output_rows = []
+
+        for _, row in df.iterrows():
+            prod_svc = str(row.get('Product / Service', '')).strip()
+
+            # If there are no commas, the row is already granular/standard
+            if ',' not in prod_svc:
+                output_rows.append(row.to_dict())
+                continue
+
+            # Explode the comma-separated string based STRICTLY on data present
+            items = [item.strip() for item in prod_svc.split(',') if item.strip()]
+
+            for i, item in enumerate(items):
+                exploded_row = row.copy()
+                exploded_row['Product / Service'] = item
+                exploded_row['Quantity'] = 1
+
+                if i > 0:
+                    # Only the first item carries the lumped financial total.
+                    # The rest become zero-dollar line items for QBO.
+                    exploded_row['Total Amount'] = Decimal('0.00')
+                    exploded_row['Unit Cost'] = Decimal('0.00')
+
+                output_rows.append(exploded_row.to_dict())
+
+        return pd.DataFrame(output_rows)
+
     def parse_file(self, file_path: str) -> pd.DataFrame:
         """
         Parse gyno CSV with full production robustness.
         Handles: trailing commas, malformed rows, junk data.
         """
-        if not file_path.endswith(('.csv', '.tsv', '.txt')):
+        if not file_path.endswith(('.csv', '.tsv', '.txt', '.xls', '.xlsx')):
             raise ValueError(f"Unsupported file type: {file_path}")
 
         try:
@@ -143,6 +177,9 @@ class CSVParser:
 
             if 'Quantity' in df.columns:
                 df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce').fillna(1).astype(int)
+
+            # Step 8: Explode comma-separated bundles using strictly CSV data
+            df = self._normalize_bundled_data(df)
 
             # Final validation
             if df.empty:
