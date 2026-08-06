@@ -51,7 +51,7 @@ def process_csv_file(file_path):
 
         required_columns = ['Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service',
                             'Description', 'Total Amount', 'Quantity', 'Unit Cost',
-                            'Service Date', 'Mode of Payment']
+                            'Service Date', 'Mode of Payment', 'Is Insurance?']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             logger.error(f"Missing required columns: {missing_columns}")
@@ -85,8 +85,25 @@ def process_csv_file(file_path):
                 except: return Decimal('1.0')
 
             def build_lines(group, invoice_num, for_invoice=False):
+                """
+                ZERO-DOLLAR LINE POLICY.
+
+                The EMR bundles multiple services into one comma-separated
+                'Product / Service' string. Instead of forcing that whole string
+                into one broken line item:
+
+                  1. SPLIT & EXTRACT  — split the Product / Service string on
+                     commas into distinct items.
+                  2. ZERO-DOLLAR ITEMIZATION — emit one $0.00 line item per
+                     extracted item (Qty=1, UnitPrice=$0.00) so the full medical
+                     record is captured on the receipt.
+                  3. TOTAL VALUE LINE — QuickBooks computes the transaction total
+                     from its line items, so we append ONE final line
+                     ("Total Visit Charges") carrying the real Total Amount.
+                """
                 lines = []
                 inventory_adjustments = []  # Collect pharmacy lines that need real qty deduction
+                total_value = Decimal('0.00')  # Accumulate the real total for the whole invoice
 
                 for _, row in group.iterrows():
                     # === DEBUG: PRE-BUILD STATE (row passed into find_or_create_product) ===
@@ -103,59 +120,78 @@ def process_csv_file(file_path):
                         row.get('Total Amount'),
                     )
 
-                    item_id = product_service.find_or_create_product(row, invoice_num)
-
-                    # === DEBUG: resolved item id ===
-                    logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}: {item_id!r}")
-
                     qty_csv = Decimal(str(row['Quantity'] or '1'))
                     total_amount_csv = parse_money(row['Total Amount'])
                     unit_cost = parse_money(row['Unit Cost'])
                     description = str(row.get('Description', '') or '').strip()
 
+                    # Accumulate the real transaction total for the whole invoice group.
+                    total_value += total_amount_csv
+
                     if total_amount_csv <= 0:
                         logger.warning(f"PRE-BUILD skipping row (total_amount<=0) invoice {invoice_num}: {row.to_dict()}")
                         continue
 
-                    # ——————— BUILD THE VISIBLE LINE EXACTLY AS YOU WANT ———————
-                    if for_invoice:
-                        # INSURANCE: always Qty=1, UnitPrice = total from CSV (810, 607.50, etc.)
-                        qty_to_show = 1.0
-                        unit_price = float(total_amount_csv)
-                        amount = float(total_amount_csv.quantize(Decimal('0.01')))
-                    else:
-                        # CASH: real qty and real unit cost
-                        qty_to_show = float(qty_csv) if qty_csv > 0 else 1.0
-                        unit_price = float(unit_cost.quantize(Decimal('0.01')))
-                        amount = float((qty_csv * unit_cost).quantize(Decimal('0.01')))
+                    # ——————— 1. SPLIT & EXTRACT ———————
+                    prod_svc_raw = str(row.get('Product / Service', '') or '').strip()
+                    items = [item.strip() for item in prod_svc_raw.split(',') if item.strip()]
+                    if not items:
+                        items = [prod_svc_raw]  # nothing usable → keep the raw value as one item
 
-                    sales_item_detail = {
-                        "ItemRef": {"value": str(item_id)},
-                        "Qty": qty_to_show,
-                        "UnitPrice": unit_price,
-                        "TaxCodeRef": {"value": "6"}
-                    }
+                    # ——————— 2. ZERO-DOLLAR ITEMIZATION ———————
+                    for item in items:
+                        item_row = row.copy()
+                        item_row['Product / Service'] = item
 
-                    line = {
-                        "DetailType": "SalesItemLineDetail",
-                        "Amount": amount,
-                        "Description": description,
-                        "SalesItemLineDetail": sales_item_detail
-                    }
-                    lines.append(line)
+                        item_id = product_service.find_or_create_product(item_row, invoice_num)
 
-                    # ——————— IF PHARMACY + INSURANCE → REMEMBER TO DEDUCT REAL QTY LATER ———————
-                    if for_invoice and product_service.is_pharmacy_item(row) and qty_csv > 1:
-                        inventory_adjustments.append({
-                            "item_id": item_id,
-                            "real_qty": int(qty_csv),
-                            "description": description
-                        })
+                        # === DEBUG: resolved item id ===
+                        logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}, item={item!r}: {item_id!r}")
+
+                        # Zero-dollar line: Qty=1, UnitPrice=$0.00, Amount=$0.00
+                        sales_item_detail = {
+                            "ItemRef": {"value": str(item_id)},
+                            "Qty": 1.0,
+                            "UnitPrice": 0.0,
+                            "TaxCodeRef": {"value": "6"}
+                        }
+
+                        line = {
+                            "DetailType": "SalesItemLineDetail",
+                            "Amount": 0.0,
+                            "Description": description or item,
+                            "SalesItemLineDetail": sales_item_detail
+                        }
+                        lines.append(line)
+
+                        # ——————— IF PHARMACY + INSURANCE → REMEMBER TO DEDUCT REAL QTY LATER ———————
+                        if for_invoice and product_service.is_pharmacy_item(item_row) and qty_csv > 1:
+                            inventory_adjustments.append({
+                                "item_id": item_id,
+                                "real_qty": int(qty_csv),
+                                "description": description or item
+                            })
 
                 # ——————— AFTER TRANSACTION IS CREATED → DEDUCT REAL STOCK FOR INSURANCE PHARMACY ITEMS ———————
                 if inventory_adjustments and for_invoice:
                     # We do this in invoice_service.create_or_update_invoice() — see step 3 below
                     group._inventory_adjustments = inventory_adjustments  # monkey-patch the group
+
+                # ——————— 3. TOTAL VALUE LINE ———————
+                if lines and total_value > 0:
+                    total_row = group.iloc[0].copy()
+                    lines.append({
+                        "DetailType": "SalesItemLineDetail",
+                        "Amount": float(total_value.quantize(Decimal('0.01'))),
+                        "Description": "Total Visit Charges",
+                        "SalesItemLineDetail": {
+                            "ItemRef": {"value": str(product_service.find_or_create_product(total_row, invoice_num))},
+                            "Qty": 1.0,
+                            "UnitPrice": float(total_value.quantize(Decimal('0.01'))),
+                            "TaxCodeRef": {"value": "6"}
+                        }
+                    })
+                    logger.info(f"PRE-BUILD appended 'Total Visit Charges' line of {total_value} for invoice {invoice_num}")
 
                 return lines
 
