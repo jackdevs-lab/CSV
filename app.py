@@ -122,6 +122,10 @@ def process_csv_file(file_path):
                   3. TOTAL VALUE LINE — QuickBooks computes the transaction total
                      from its line items, so we append ONE final line
                      ("Total Visit Charges") carrying the real Total Amount.
+
+                Error isolation: a failure to resolve/append ONE split item is
+                logged and skipped so the remaining items (and the invoice)
+                still get created.
                 """
                 lines = []
                 inventory_adjustments = []  # Collect pharmacy lines that need real qty deduction
@@ -160,52 +164,59 @@ def process_csv_file(file_path):
                     if not items:
                         items = [prod_svc_raw]  # nothing usable → keep the raw value as one item
 
-# ——————— 2. ZERO-DOLLAR ITEMIZATION ———————
+                    # ——————— 2. ZERO-DOLLAR ITEMIZATION ———————
                     for item in items:
-                        item_row = row.copy()
-                        item_row['Product / Service'] = item
+                        try:
+                            item_row = row.copy()
+                            item_row['Product / Service'] = item
 
-                        # Resolve each unique comma-split item by its ACTUAL name so
-                        # QuickBooks shows the real medical service under Product/Service
-                        # instead of the generic 'Service' fallback.
-                        item_id = product_service.find_or_create_product(item, invoice_num)
+                            # Resolve each unique comma-split item by its ACTUAL name so
+                            # QuickBooks shows the real medical service under Product/Service
+                            # instead of the generic 'Service' fallback.
+                            item_id = product_service.find_or_create_product(item, invoice_num)
 
-                        # === DEBUG: resolved item id ===
-                        logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}, item={item!r}: {item_id!r}")
+                            # === DEBUG: resolved item id ===
+                            logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}, item={item!r}: {item_id!r}")
 
-                        # Zero-dollar line: Qty=1, UnitPrice=$0.00, Amount=$0.00.
-                        # Use the unique ItemRef.value; QuickBooks renders the catalog
-                        # name tied to that ID (ItemRef.name is ignored by the API).
-                        # Intentionally OMIT the outer "Description" key so QuickBooks
-                        # uses its native catalog description for this ItemRef.
-                        sales_item_detail = {
-                            "ItemRef": {"value": str(item_id)},
-                            "Qty": 1.0,
-                            "UnitPrice": 0.0,
-                            "TaxCodeRef": {"value": "6"}
-                        }
+                            # Zero-dollar line: Qty=1, UnitPrice=$0.00, Amount=$0.00.
+                            # Use the unique ItemRef.value; QuickBooks renders the catalog
+                            # name tied to that ID (ItemRef.name is ignored by the API).
+                            # Intentionally OMIT the outer "Description" key so QuickBooks
+                            # uses its native catalog description for this ItemRef.
+                            sales_item_detail = {
+                                "ItemRef": {"value": str(item_id)},
+                                "Qty": 1.0,
+                                "UnitPrice": 0.0,
+                                "TaxCodeRef": {"value": "6"}
+                            }
 
-                        line = {
-                            "DetailType": "SalesItemLineDetail",
-                            "Amount": 0.0,
-                            "SalesItemLineDetail": sales_item_detail
-                        }
-                        lines.append(line)
+                            line = {
+                                "DetailType": "SalesItemLineDetail",
+                                "Amount": 0.0,
+                                "SalesItemLineDetail": sales_item_detail
+                            }
+                            lines.append(line)
 
-                        # ——————— IF PHARMACY + INSURANCE → REMEMBER TO DEDUCT REAL QTY LATER ———————
-                        if for_invoice and product_service.is_pharmacy_item(item_row) and qty_csv > 1:
-                            inventory_adjustments.append({
-                                "item_id": item_id,
-                                "real_qty": int(qty_csv),
-                                "description": description or item
-                            })
+                            # ——————— IF PHARMACY + INSURANCE → REMEMBER TO DEDUCT REAL QTY LATER ———————
+                            if for_invoice and product_service.is_pharmacy_item(item_row) and qty_csv > 1:
+                                inventory_adjustments.append({
+                                    "item_id": item_id,
+                                    "real_qty": int(qty_csv),
+                                    "description": description or item
+                                })
+                        except Exception as e:
+                            # Error isolation: skip this item but keep going with the rest.
+                            logger.warning(
+                                f"PRE-BUILD failed to process item {item!r} for invoice {invoice_num}: {e} — skipping this item"
+                            )
+                            continue
 
                 # ——————— AFTER TRANSACTION IS CREATED → DEDUCT REAL STOCK FOR INSURANCE PHARMACY ITEMS ———————
                 if inventory_adjustments and for_invoice:
                     # We do this in invoice_service.create_or_update_invoice() — see step 3 below
                     group._inventory_adjustments = inventory_adjustments  # monkey-patch the group
 
-# ——————— 3. TOTAL VALUE LINE ———————
+                # ——————— 3. TOTAL VALUE LINE ———————
                 if lines and total_value > 0:
                     # Resolve the total line to a real catalog item so it does not
                     # fall back to the generic 'Service'. QuickBooks will render the

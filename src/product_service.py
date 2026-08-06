@@ -15,7 +15,6 @@ class ProductService:
         self.item_cache = {}  # Cache for item IDs
         self.mapper = TransactionMapper()  # ✅ Add this line
 
-
     def find_or_create_product(self, item_name, invoice_id=None):
         """
         Resolve a split product/service item by its ACTUAL name.
@@ -27,6 +26,9 @@ class ProductService:
 
         This prevents the generic 'Service' fallback that made every split
         line render as 'Service' in QuickBooks.
+
+        Error isolation: a failure to look up or create one item is logged and
+        contained so it never aborts processing of the remaining items.
         """
         product = str(item_name or '').strip() or "Uncategorized"
 
@@ -42,7 +44,18 @@ class ProductService:
             return self.item_cache[sanitized_name]
 
         # ONE SINGLE LOOKUP by the actual item name.
-        existing_item = self.qb_client.find_item_by_name(sanitized_name)
+        # find_item_by_name already escapes single quotes ('') so special
+        # characters in names (parentheses, slashes, ampersands, quotes) do
+        # not break the SQL. We still guard against any unexpected exception so
+        # a bad name never aborts the whole invoice.
+        try:
+            existing_item = self.qb_client.find_item_by_name(sanitized_name)
+        except Exception as e:
+            logger.warning(
+                f"find_or_create_product lookup failed for '{sanitized_name}' "
+                f"(invoice {invoice_id}): {e} — treating as not found"
+            )
+            existing_item = None
 
         if existing_item:
             # Found it → cache and return.
@@ -62,6 +75,8 @@ class ProductService:
         }
 
         # One create attempt. If it fails due to duplicate → extract ID and move on.
+        # Any other exception is isolated and re-raised so the caller can decide
+        # whether to skip this item and continue with the rest.
         try:
             response = self.qb_client.create_item(item_data)
             item_id = response["Item"]["Id"]
@@ -77,6 +92,12 @@ class ProductService:
                 item_data["Name"] = f"{sanitized_name}_{int(time.time())}"[:100]
                 response = self.qb_client.create_item(item_data)
                 item_id = response["Item"]["Id"]
+        except Exception as e:
+            logger.error(
+                f"find_or_create_product failed to create '{sanitized_name}' "
+                f"(invoice {invoice_id}): {e}", exc_info=True
+            )
+            raise
 
         # Cache it forever
         self.item_cache[sanitized_name] = item_id
@@ -95,6 +116,7 @@ class ProductService:
                 time.sleep(wait)
 
         return None
+
     def is_pharmacy_item(self, row):
         product = str(row.get('Product / Service') or '').strip().lower()
         description = str(row.get('Description') or '').strip().lower()

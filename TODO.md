@@ -28,3 +28,6 @@ Trace where the new CSV data format breaks parsing/mapping before implementing v
   - [x] find_or_create_product resolves by actual item name (lookup + create)
   - [x] build_lines passes split item name, uses ItemRef.value only
   - [x] Total line resolves to a real item label
+- [x] Multi-item EMR splitting error isolation
+  - [x] find_or_create_product: try/except around lookup + create; raise on create failure for caller to skip
+  - [x] build_lines: per-item try/except so one bad item doesn't abort the invoice
