@@ -15,4 +15,12 @@ Trace where the new CSV data format breaks parsing/mapping before implementing v
 - [x] Recompile / import-check app.py
 - [x] Zero-Dollar refinement: pass item name into ItemRef.name, omit outer Description
 - [x] Add QuickBooksAuthError handling in process_csv_file (auth gate safety net)
-- [ ] (Deferred) Session-based auth gate + token-age audit (Part 1/Part 2 plan)
+- [x] Part 1: Session-based auth gate (redirect to /login before dashboard)
+  - [x] Set session['connected'] in /callback
+  - [x] require_connection guard
+  - [x] Gate / and /upload
+  - [x] Gate /status (optional)
+- [x] Part 2: Token-age audit in src/qb_auth.py
+  - [x] Record qb_refresh_token_issued_at on mint
+  - [x] Add refresh_token_health() method
+  - [x] Log token age on refresh

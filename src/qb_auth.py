@@ -110,6 +110,14 @@ class QuickBooksAuth:
         self._lock = True
         try:
             logger.info("Refreshing QuickBooks access token...")
+            # Log token age so we can tell whether invalid_grant is age-out vs revoke.
+            health = self.refresh_token_health()
+            logger.info(
+                "Refresh token health: status=%s reason=%s age_days=%s",
+                health.get("status"),
+                health.get("reason"),
+                health.get("age_days"),
+            )
             # Intuit's bearer token endpoint requires client credentials IN THE BODY.
             # Do NOT send an HTTP Basic auth header — Intuit rejects it with
             # {"error":"invalid_client"} (HTTP 401/400).
@@ -183,6 +191,8 @@ class QuickBooksAuth:
             if new_refresh and new_refresh != self._tokens["refresh_token"]:
                 logger.info("New refresh token received - updating storage")
                 self._set_stored_value("qb_refresh_token", new_refresh)
+                # A rotated refresh token is effectively a fresh 100-day grant.
+                self._set_stored_value("qb_refresh_token_issued_at", int(time.time()))
 
             self._tokens.update({
                 "access_token": new_tokens["access_token"],
@@ -213,6 +223,33 @@ class QuickBooksAuth:
     def get_realm_id(self):
         return self._tokens.get("realmId")
 
+    def refresh_token_health(self):
+        """
+        Return a dict describing the stored refresh token's likely health.
+
+        reason codes:
+          ok               — a refresh token exists and is within Intuit's 100-day window
+          no_token         — no refresh token is stored/configured
+          aged_out         — refresh token is older than Intuit's 100-day absolute limit
+          unknown_age      — a token exists but we don't know when it was issued
+        """
+        if not self.permanent_refresh_token:
+            return {"status": "no_token", "reason": "no_token", "age_days": None}
+
+        issued_at = self._get_stored_value("qb_refresh_token_issued_at")
+        if not issued_at:
+            return {"status": "unknown", "reason": "unknown_age", "age_days": None}
+
+        try:
+            age_days = (time.time() - float(issued_at)) / 86400.0
+        except Exception:
+            return {"status": "unknown", "reason": "unknown_age", "age_days": None}
+
+        if age_days >= 100.0:
+            return {"status": "invalid", "reason": "aged_out", "age_days": round(age_days, 1)}
+
+        return {"status": "ok", "reason": "ok", "age_days": round(age_days, 1)}
+
     # OAuth flow — only used once every 100 days or on new setup
     def get_authorization_url(self):
         from requests_oauthlib import OAuth2Session
@@ -242,6 +279,9 @@ class QuickBooksAuth:
         # Update permanent refresh token in file (and log for manual verification)
         new_refresh_token = tokens["refresh_token"]
         self._set_stored_value("qb_refresh_token", new_refresh_token)
+        # Record when this refresh token was issued so we can detect Intuit's
+        # 100-day absolute expiration limit during future audits.
+        self._set_stored_value("qb_refresh_token_issued_at", int(time.time()))
         if realm_id:
             self._set_stored_value("qb_realm_id", realm_id)
 

@@ -1,5 +1,5 @@
 # app.py  ← FINAL FREE VERSION (NO REDIS, NO WORKER, HANDLES 5000+ ROWS)
-from flask import Flask, request, render_template, jsonify, redirect
+from flask import Flask, request, render_template, jsonify, redirect, session
 from pathlib import Path
 import os
 import logging
@@ -35,6 +35,27 @@ log_stream = StringIO()
 handler = logging.StreamHandler(log_stream)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
+
+
+def require_connection():
+    """
+    Validate the QuickBooks connection before allowing dashboard/upload access.
+    Returns True if healthy. On connexion failure (esp. a dead refresh token),
+    clears the session and the caller redirects to /login.
+    """
+    try:
+        auth = QuickBooksAuth()
+        auth.get_valid_access_token()
+        return True
+    except QuickBooksAuthError as e:
+        logger.error(f"Connection validation failed: {e}")
+        session.clear()
+        return False
+    except Exception as e:
+        logger.error(f"Connection validation failed: {e}", exc_info=True)
+        session.clear()
+        return False
+
 
 # ←←← CHUNKED VERSION (FREE FOREVER) ←←←
 def process_csv_file(file_path):
@@ -294,6 +315,12 @@ def process_csv_file(file_path):
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    if not require_connection():
+        return jsonify({
+            'success': False,
+            'error': 'QuickBooks connection lost. Please reconnect at /login.'
+        }), 401
+
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file'})
 
@@ -319,16 +346,15 @@ def upload_file():
 
 @app.route('/status')
 def status():
-    try:
-        auth = QuickBooksAuth()
-        auth.get_valid_access_token()
-        return jsonify({'connected': True})
-    except Exception as e:
-        logger.error(f"Status check failed: {str(e)}")
-        return jsonify({'connected': False})
+    if not require_connection():
+        return jsonify({'connected': False, 'reason': 'invalid_refresh'})
+    return jsonify({'connected': True})
 
 @app.route('/')
-def index(): return render_template('index.html')
+def index():
+    if not require_connection():
+        return redirect('/login')
+    return render_template('index.html')
 
 @app.route('/login')
 def login():
@@ -354,20 +380,15 @@ def callback():
         tokens = auth.fetch_tokens(auth_response_url)
 
         realm_id = tokens.get("realmId")
+        session['connected'] = True
+        session['realm_id'] = realm_id
         logger.info("OAuth2 flow completed successfully!")
         logger.info(f"Company ID (realmId): {realm_id}")
         logger.info("A new refresh token has been printed in the logs above.")
         logger.info("Copy the new QB_REFRESH_TOKEN and update it in your environment variables.")
         logger.info("Also set QB_REALM_ID if it's not already set.")
 
-        return '''
-        <h2>Connected to QuickBooks successfully!</h2>
-        <p>Check the server logs – your <strong>new QB_REFRESH_TOKEN</strong> is printed there.</p>
-        <p>Copy it and update your environment variable immediately (it only shows once).</p>
-        <p>Optionally set <code>QB_REALM_ID={realm_id}</code> too.</p>
-        <hr>
-        <a href="/">← Back to upload page</a>
-        '''.replace("{realm_id}", str(realm_id))
+        return redirect('/')
 
     except Exception as e:
         logger.error("Callback failed", exc_info=True)
