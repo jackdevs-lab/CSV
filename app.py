@@ -89,14 +89,32 @@ def process_csv_file(file_path):
                 inventory_adjustments = []  # Collect pharmacy lines that need real qty deduction
 
                 for _, row in group.iterrows():
+                    # === DEBUG: PRE-BUILD STATE (row passed into find_or_create_product) ===
+                    logger.info(f"PRE-BUILD row for invoice {invoice_num}: {row.to_dict()}")
+
+                    # === DEBUG: values used before product resolution ===
+                    logger.info(
+                        "PRE-BUILD values | invoice=%s | Product/Service=%r | Description=%r | Qty=%r | UnitCost=%r | TotalAmount=%r",
+                        invoice_num,
+                        row.get('Product / Service'),
+                        row.get('Description'),
+                        row.get('Quantity'),
+                        row.get('Unit Cost'),
+                        row.get('Total Amount'),
+                    )
+
                     item_id = product_service.find_or_create_product(row, invoice_num)
-                    
+
+                    # === DEBUG: resolved item id ===
+                    logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}: {item_id!r}")
+
                     qty_csv = Decimal(str(row['Quantity'] or '1'))
                     total_amount_csv = parse_money(row['Total Amount'])
                     unit_cost = parse_money(row['Unit Cost'])
                     description = str(row.get('Description', '') or '').strip()
 
                     if total_amount_csv <= 0:
+                        logger.warning(f"PRE-BUILD skipping row (total_amount<=0) invoice {invoice_num}: {row.to_dict()}")
                         continue
 
                     # ——————— BUILD THE VISIBLE LINE EXACTLY AS YOU WANT ———————

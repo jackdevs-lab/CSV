@@ -44,6 +44,9 @@ class CSVParser:
                     if not line.strip():
                         continue  # skip empty lines
 
+                    # === DEBUG: RAW LINE (exact bytes from file) ===
+                    logger.info(f"RAW LINE {line_num}: {line}")
+
                     # Split on tab
                     fields = line.split('\t')
 
@@ -151,6 +154,9 @@ class CSVParser:
                 logger.warning("No data rows found after parsing")
                 return pd.DataFrame(columns=self.required_columns)
 
+            # === DEBUG: RAW RAW COLUMNS (exact headers from pandas) ===
+            logger.info(f"=== RAW COLUMNS: {df.columns.tolist()} ===")
+
             # Step 3: Clean column names
             original_columns = df.columns.tolist()
             df.columns = [
@@ -159,8 +165,18 @@ class CSVParser:
             ]
             logger.debug(f"Cleaned columns: {original_columns} → {df.columns.tolist()}")
 
+            # === DEBUG: RAW INGESTION (first 3 rows before any manipulation) ===
+            logger.info("=== RAW INGESTION (first 3 raw rows before any manipulation) ===")
+            for i, raw_row in enumerate(df.head(3).to_dict('records')):
+                logger.info(f"RAW ROW {i}: {raw_row}")
+
             # Step 4: Remap to standard names
             df = self._remap_columns(df)
+
+            # === DEBUG: AFTER COLUMN REMAP ===
+            logger.info(f"=== AFTER REMAP COLUMNS: {df.columns.tolist()} ===")
+            for i, mapped_row in enumerate(df.head(3).to_dict('records')):
+                logger.info(f"MAPPED ROW {i}: {mapped_row}")
 
             # Step 5: Ensure required columns
             df = self._ensure_required_columns(df)
@@ -180,6 +196,11 @@ class CSVParser:
 
             # Step 8: Explode comma-separated bundles using strictly CSV data
             df = self._normalize_bundled_data(df)
+
+            # === DEBUG: PRE-BUILD STATE (final normalized rows) ===
+            logger.info("=== PRE-BUILD STATE (final normalized DataFrame) ===")
+            for i, final_row in enumerate(df.head(3).to_dict('records')):
+                logger.info(f"FINAL ROW {i}: {final_row}")
 
             # Final validation
             if df.empty:
