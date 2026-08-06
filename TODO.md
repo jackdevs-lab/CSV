@@ -13,4 +13,6 @@ Trace where the new CSV data format breaks parsing/mapping before implementing v
   - [x] Zero-Dollar Itemization: $0.00 line per extracted item
   - [x] Total Value Line: append "Total Visit Charges" with real total
 - [x] Recompile / import-check app.py
-- [ ] Then implement validation layers (deferred)
+- [x] Zero-Dollar refinement: pass item name into ItemRef.name, omit outer Description
+- [x] Add QuickBooksAuthError handling in process_csv_file (auth gate safety net)
+- [ ] (Deferred) Session-based auth gate + token-age audit (Part 1/Part 2 plan)

@@ -22,12 +22,13 @@ from src.customer_service import CustomerService
 from src.product_service import ProductService
 from src.invoice_service import InvoiceService
 from src.receipt_service import ReceiptService
-from src.qb_auth import QuickBooksAuth
+from src.qb_auth import QuickBooksAuth, QuickBooksAuthError
 from src.qb_client import QuickBooksClient
 from src.logger import setup_logger, log_processing_result
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 
 logger = setup_logger(__name__)
 log_stream = StringIO()
@@ -148,9 +149,13 @@ def process_csv_file(file_path):
                         # === DEBUG: resolved item id ===
                         logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}, item={item!r}: {item_id!r}")
 
-                        # Zero-dollar line: Qty=1, UnitPrice=$0.00, Amount=$0.00
+                        # Zero-dollar line: Qty=1, UnitPrice=$0.00, Amount=$0.00.
+                        # Pass the extracted item name into ItemRef.name so it lands in
+                        # the Product/Service column. Intentionally OMIT the outer
+                        # "Description" key so QuickBooks uses its native catalog
+                        # description for this ItemRef.
                         sales_item_detail = {
-                            "ItemRef": {"value": str(item_id)},
+                            "ItemRef": {"value": str(item_id), "name": item},
                             "Qty": 1.0,
                             "UnitPrice": 0.0,
                             "TaxCodeRef": {"value": "6"}
@@ -159,7 +164,6 @@ def process_csv_file(file_path):
                         line = {
                             "DetailType": "SalesItemLineDetail",
                             "Amount": 0.0,
-                            "Description": description or item,
                             "SalesItemLineDetail": sales_item_detail
                         }
                         lines.append(line)
@@ -280,6 +284,9 @@ def process_csv_file(file_path):
         log_processing_result(file_path, results)
         return not has_real_error, ui_log
 
+    except QuickBooksAuthError as e:
+        logger.error(f"QuickBooks auth failed during processing: {e}", exc_info=True)
+        return False, f"QuickBooks authentication failed: {e}\nPlease reconnect your account at /login"
     except Exception as e:
         logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
         return False, log_stream.getvalue()
