@@ -160,23 +160,26 @@ def process_csv_file(file_path):
                     if not items:
                         items = [prod_svc_raw]  # nothing usable → keep the raw value as one item
 
-                    # ——————— 2. ZERO-DOLLAR ITEMIZATION ———————
+# ——————— 2. ZERO-DOLLAR ITEMIZATION ———————
                     for item in items:
                         item_row = row.copy()
                         item_row['Product / Service'] = item
 
-                        item_id = product_service.find_or_create_product(item_row, invoice_num)
+                        # Resolve each unique comma-split item by its ACTUAL name so
+                        # QuickBooks shows the real medical service under Product/Service
+                        # instead of the generic 'Service' fallback.
+                        item_id = product_service.find_or_create_product(item, invoice_num)
 
                         # === DEBUG: resolved item id ===
                         logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}, item={item!r}: {item_id!r}")
 
                         # Zero-dollar line: Qty=1, UnitPrice=$0.00, Amount=$0.00.
-                        # Pass the extracted item name into ItemRef.name so it lands in
-                        # the Product/Service column. Intentionally OMIT the outer
-                        # "Description" key so QuickBooks uses its native catalog
-                        # description for this ItemRef.
+                        # Use the unique ItemRef.value; QuickBooks renders the catalog
+                        # name tied to that ID (ItemRef.name is ignored by the API).
+                        # Intentionally OMIT the outer "Description" key so QuickBooks
+                        # uses its native catalog description for this ItemRef.
                         sales_item_detail = {
-                            "ItemRef": {"value": str(item_id), "name": item},
+                            "ItemRef": {"value": str(item_id)},
                             "Qty": 1.0,
                             "UnitPrice": 0.0,
                             "TaxCodeRef": {"value": "6"}
@@ -202,15 +205,18 @@ def process_csv_file(file_path):
                     # We do this in invoice_service.create_or_update_invoice() — see step 3 below
                     group._inventory_adjustments = inventory_adjustments  # monkey-patch the group
 
-                # ——————— 3. TOTAL VALUE LINE ———————
+# ——————— 3. TOTAL VALUE LINE ———————
                 if lines and total_value > 0:
-                    total_row = group.iloc[0].copy()
+                    # Resolve the total line to a real catalog item so it does not
+                    # fall back to the generic 'Service'. QuickBooks will render the
+                    # item name tied to this ID.
+                    total_item_id = product_service.find_or_create_product("Total Visit Charges", invoice_num)
                     lines.append({
                         "DetailType": "SalesItemLineDetail",
                         "Amount": float(total_value.quantize(Decimal('0.01'))),
                         "Description": "Total Visit Charges",
                         "SalesItemLineDetail": {
-                            "ItemRef": {"value": str(product_service.find_or_create_product(total_row, invoice_num))},
+                            "ItemRef": {"value": str(total_item_id)},
                             "Qty": 1.0,
                             "UnitPrice": float(total_value.quantize(Decimal('0.01'))),
                             "TaxCodeRef": {"value": "6"}

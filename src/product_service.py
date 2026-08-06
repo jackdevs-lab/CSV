@@ -16,35 +16,42 @@ class ProductService:
         self.mapper = TransactionMapper()  # ✅ Add this line
 
 
-    def find_or_create_product(self, row, invoice_id):
-        """One lookup. Miss → create. That's it. No retries. No waiting. Done."""
-        
-        # Fast input cleanup
-        description = str(row.get('Description') or '').strip() or "Service"
-        product = str(row.get('Product / Service') or '').strip() or "Uncategorized"
+    def find_or_create_product(self, item_name, invoice_id=None):
+        """
+        Resolve a split product/service item by its ACTUAL name.
 
-        original_product = product.lower()
+        - Lookup QuickBooks by name (SELECT * FROM Item WHERE Name = '...').
+        - If it exists, return its unique item ID.
+        - If it does not exist, create it as a new Service item and return the
+          newly generated ID.
 
-        # Use description as QB Item Name (your original logic)
-        service_name = ' '.join(description.split())
-        sanitized_name = ''.join(c if c.isalnum() or c in ' .-_' else ' ' for c in service_name)
+        This prevents the generic 'Service' fallback that made every split
+        line render as 'Service' in QuickBooks.
+        """
+        product = str(item_name or '').strip() or "Uncategorized"
+
+        # Sanitize the name so it is a valid QuickBooks Item Name.
+        sanitized_name = ''.join(c if c.isalnum() or c in ' .-_' else ' ' for c in product)
         sanitized_name = ' '.join(sanitized_name.split()).title()[:100]
+
+        if not sanitized_name:
+            sanitized_name = "Uncategorized"
 
         # Cache = speed king
         if sanitized_name in self.item_cache:
             return self.item_cache[sanitized_name]
 
-        # ONE SINGLE LOOKUP — that's all you're willing to pay for
-        existing_item = self.qb_client.find_item_by_name(service_name)
+        # ONE SINGLE LOOKUP by the actual item name.
+        existing_item = self.qb_client.find_item_by_name(sanitized_name)
 
         if existing_item:
-            # Found it → cache and return (even if account is wrong — you said speed > perfection)
+            # Found it → cache and return.
             item_id = existing_item["Id"]
             self.item_cache[sanitized_name] = item_id
             return item_id
 
-        # Not found → create with correct income account
-        income_account_ref = self.mapper.map_income_account(original_product)
+        # Not found → create as a Service item with the correct income account.
+        income_account_ref = self.mapper.map_income_account(product)
 
         item_data = {
             "Name": sanitized_name,
@@ -54,19 +61,19 @@ class ProductService:
             "TrackQtyOnHand": False
         }
 
-        # One create attempt. If it fails due to duplicate → extract ID and move on
+        # One create attempt. If it fails due to duplicate → extract ID and move on.
         try:
             response = self.qb_client.create_item(item_data)
             item_id = response["Item"]["Id"]
         except requests.exceptions.HTTPError as e:
             text = getattr(e.response, "text", "")
-            # Magic: QuickBooks tells us the real ID in the error
+            # QuickBooks sometimes returns the real ID in the error body.
             import re
             match = re.search(r'Id=(\d+)', text)
             if match:
                 item_id = match.group(1)
             else:
-                # Worst case: name collision we didn't expect → append suffix and go
+                # Worst case: name collision we didn't expect → append suffix and go.
                 item_data["Name"] = f"{sanitized_name}_{int(time.time())}"[:100]
                 response = self.qb_client.create_item(item_data)
                 item_id = response["Item"]["Id"]

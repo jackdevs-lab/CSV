@@ -24,3 +24,7 @@ Trace where the new CSV data format breaks parsing/mapping before implementing v
   - [x] Record qb_refresh_token_issued_at on mint
   - [x] Add refresh_token_health() method
   - [x] Log token age on refresh
+- [x] Product/Service mapping bugfix (all split items rendered as "Service")
+  - [x] find_or_create_product resolves by actual item name (lookup + create)
+  - [x] build_lines passes split item name, uses ItemRef.value only
+  - [x] Total line resolves to a real item label
