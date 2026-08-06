@@ -195,8 +195,8 @@ class CSVParser:
                 df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce').fillna(1).astype(int)
 
             # Step 8: Explode comma-separated bundles using strictly CSV data
-            df = self._normalize_bundled_data(df)
-
+            #df = self._normalize_bundled_data(df)
+    
             # === DEBUG: PRE-BUILD STATE (final normalized rows) ===
             logger.info("=== PRE-BUILD STATE (final normalized DataFrame) ===")
             for i, final_row in enumerate(df.head(3).to_dict('records')):
