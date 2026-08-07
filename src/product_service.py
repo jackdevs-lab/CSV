@@ -4,7 +4,6 @@ import requests
 import time
 from src.mapper import TransactionMapper
 
-
 logger = setup_logger(__name__)
 
 class ProductService:
@@ -13,22 +12,27 @@ class ProductService:
     def __init__(self, qb_client):
         self.qb_client = qb_client
         self.item_cache = {}  # Cache for item IDs
-        self.mapper = TransactionMapper()  # ✅ Add this line
+        self.mapper = TransactionMapper()  
+        self._preload_products()  # ✅ Preload everything on startup!
+
+    def _preload_products(self):
+        """Fetch all items from QuickBooks once on startup to eliminate N+1 query bottlenecks."""
+        try:
+            query = "SELECT Id, Name FROM Item MAXRESULTS 1000"
+            response = self.qb_client.query(query)
+            if response and 'QueryResponse' in response and 'Item' in response['QueryResponse']:
+                for item in response['QueryResponse']['Item']:
+                    name = item.get('Name', '').strip().lower()
+                    item_id = item.get('Id')
+                    if name and item_id:
+                        self.item_cache[name] = item_id
+            logger.info(f"Successfully preloaded {len(self.item_cache)} products into local memory cache.")
+        except Exception as e:
+            logger.warning(f"Failed to preload products cache: {e} — falling back to lazy loading.")
 
     def find_or_create_product(self, item_name, invoice_id=None):
         """
         Resolve a split product/service item by its ACTUAL name.
-
-        - Lookup QuickBooks by name (SELECT * FROM Item WHERE Name = '...').
-        - If it exists, return its unique item ID.
-        - If it does not exist, create it as a new Service item and return the
-          newly generated ID.
-
-        This prevents the generic 'Service' fallback that made every split
-        line render as 'Service' in QuickBooks.
-
-        Error isolation: a failure to look up or create one item is logged and
-        contained so it never aborts processing of the remaining items.
         """
         product = str(item_name or '').strip() or "Uncategorized"
 
@@ -39,15 +43,13 @@ class ProductService:
         if not sanitized_name:
             sanitized_name = "Uncategorized"
 
-        # Cache = speed king
-        if sanitized_name in self.item_cache:
-            return self.item_cache[sanitized_name]
+        cache_key = sanitized_name.lower()
 
-        # ONE SINGLE LOOKUP by the actual item name.
-        # find_item_by_name already escapes single quotes ('') so special
-        # characters in names (parentheses, slashes, ampersands, quotes) do
-        # not break the SQL. We still guard against any unexpected exception so
-        # a bad name never aborts the whole invoice.
+        # 1. Instant local cache lookup (Zero network overhead!)
+        if cache_key in self.item_cache:
+            return self.item_cache[cache_key]
+
+        # 2. Fallback check via query if somehow missed during preload
         try:
             existing_item = self.qb_client.find_item_by_name(sanitized_name)
         except Exception as e:
@@ -58,12 +60,11 @@ class ProductService:
             existing_item = None
 
         if existing_item:
-            # Found it → cache and return.
             item_id = existing_item["Id"]
-            self.item_cache[sanitized_name] = item_id
+            self.item_cache[cache_key] = item_id
             return item_id
 
-        # Not found → create as a Service item with the correct income account.
+        # 3. Not found anywhere → create as a Service item
         income_account_ref = self.mapper.map_income_account(product)
 
         item_data = {
@@ -74,21 +75,16 @@ class ProductService:
             "TrackQtyOnHand": False
         }
 
-        # One create attempt. If it fails due to duplicate → extract ID and move on.
-        # Any other exception is isolated and re-raised so the caller can decide
-        # whether to skip this item and continue with the rest.
         try:
             response = self.qb_client.create_item(item_data)
             item_id = response["Item"]["Id"]
         except requests.exceptions.HTTPError as e:
             text = getattr(e.response, "text", "")
-            # QuickBooks sometimes returns the real ID in the error body.
             import re
             match = re.search(r'Id=(\d+)', text)
             if match:
                 item_id = match.group(1)
             else:
-                # Worst case: name collision we didn't expect → append suffix and go.
                 item_data["Name"] = f"{sanitized_name}_{int(time.time())}"[:100]
                 response = self.qb_client.create_item(item_data)
                 item_id = response["Item"]["Id"]
@@ -100,7 +96,7 @@ class ProductService:
             raise
 
         # Cache it forever
-        self.item_cache[sanitized_name] = item_id
+        self.item_cache[cache_key] = item_id
         return item_id
 
     def _robust_find_item(self, name, max_retries=8, delay=2):

@@ -2,6 +2,7 @@ from src.logger import setup_logger
 import pandas as pd
 from datetime import datetime
 import json
+import requests
 
 logger = setup_logger(__name__)
 
@@ -22,48 +23,57 @@ class InvoiceService:
 
         patient_name = group['Patient Name'].iloc[0]
 
-        # 1. CHECK IF INVOICE ALREADY EXISTS (Inpatient check)
-        query = f"SELECT * FROM Invoice WHERE DocNumber = '{doc_number}' MAXRESULTS 1"
-        existing = self.qb_client.query(query)
+        try:
+            # 1. CHECK IF INVOICE ALREADY EXISTS (Inpatient check)
+            query = f"SELECT * FROM Invoice WHERE DocNumber = '{doc_number}' MAXRESULTS 1"
+            existing = self.qb_client.query(query)
 
-        if existing and existing.get("QueryResponse", {}).get("Invoice"):
-            # 2. APPEND TO EXISTING INVOICE
-            invoice = existing["QueryResponse"]["Invoice"][0]
-            
-            # Keep all existing lines (these already have QuickBooks IDs)
-            current_lines = invoice.get("Line", [])
-            
-            # Prepare new lines (Ensuring no 'Id' exists so QB assigns it automatically)
-            new_lines = []
-            for line in lines:
-                new_line = line.copy()
-                new_line.pop("Id", None)
-                new_lines.append(new_line)
+            if existing and existing.get("QueryResponse", {}).get("Invoice"):
+                # 2. APPEND TO EXISTING INVOICE
+                invoice = existing["QueryResponse"]["Invoice"][0]
+                
+                # Keep all existing lines (these already have QuickBooks IDs)
+                current_lines = invoice.get("Line", [])
+                
+                # Prepare new lines (Ensuring no 'Id' exists so QB assigns it automatically)
+                new_lines = []
+                for line in lines:
+                    new_line = line.copy()
+                    new_line.pop("Id", None)
+                    new_lines.append(new_line)
 
-            update_payload = {
-                "Id": invoice["Id"],
-                "SyncToken": invoice["SyncToken"],
-                "sparse": True,
-                "Line": current_lines + new_lines,
-                "CustomerMemo": {"value": f"Medical service for {patient_name}"}
-            }
+                update_payload = {
+                    "Id": invoice["Id"],
+                    "SyncToken": invoice["SyncToken"],
+                    "sparse": True,
+                    "Line": current_lines + new_lines,
+                    "CustomerMemo": {"value": f"Medical service for {patient_name}"}
+                }
 
-            # Send update to QBO
-            response = self.qb_client._make_request("POST", "invoice", data=update_payload)
-            logger.info(f"Appended new items to existing invoice #{doc_number}")
+                # Send update to QBO
+                response = self.qb_client._make_request("POST", "invoice", data=update_payload)
+                logger.info(f"Appended new items to existing invoice #{doc_number}")
 
-        else:
-            # 3. CREATE BRAND NEW INVOICE
-            invoice_data = {
-                "CustomerRef": {"value": str(customer_id)},
-                "TxnDate": service_date,
-                "DocNumber": doc_number,
-                "Line": lines,
-                "CustomerMemo": {"value": f"Medical service for {patient_name}"},
-                "TxnTaxDetail": {"TxnTaxCodeRef": {"value": "6"}, "TotalTax": 0}
-            }
-            response = self.qb_client.create_invoice(invoice_data)
-            logger.info(f"Created new invoice #{doc_number}")
+            else:
+                # 3. CREATE BRAND NEW INVOICE
+                invoice_data = {
+                    "CustomerRef": {"value": str(customer_id)},
+                    "TxnDate": service_date,
+                    "DocNumber": doc_number,
+                    "Line": lines,
+                    "CustomerMemo": {"value": f"Medical service for {patient_name}"},
+                    "TxnTaxDetail": {"TxnTaxCodeRef": {"value": "6"}, "TotalTax": 0}
+                }
+                response = self.qb_client.create_invoice(invoice_data)
+                logger.info(f"Created new invoice #{doc_number}")
+
+        except requests.exceptions.HTTPError as e:
+            error_text = getattr(e.response, "text", "")
+            # Catch QuickBooks Duplicate Document Number Error (Code 6140)
+            if "6140" in error_text or "Duplicate Document Number Error" in error_text:
+                logger.warning(f"Invoice '{doc_number}' already exists in QuickBooks (Code 6140). Skipping safely.")
+                return {"Id": "EXISTS", "DocNumber": doc_number}
+            raise
 
         # PHARMACY REAL STOCK DEDUCTION (ONLY FOR INSURANCE INVOICES)
         if hasattr(group, '_inventory_adjustments') and group._inventory_adjustments:
