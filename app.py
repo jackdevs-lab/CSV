@@ -173,6 +173,7 @@ def process_csv_file(file_path, upload_id):
             logger.info(f"Processing chunk {(start//chunk_size)+1}: invoices {start+1}–{end}")
 
             for invoice_num, group in chunk:
+                transaction_type = "unknown"
                 try:
                     mapper = TransactionMapper()
                     is_insurance = mapper.is_insurance_transaction(group)
