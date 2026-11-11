@@ -1,69 +1,69 @@
+# src/logger.py
 import logging
-import os
 import shutil
 from datetime import datetime
 from pathlib import Path
 
-def setup_logger(name, log_level=logging.DEBUG):
+
+def setup_logger(name, log_level=logging.INFO):
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
-
     if not logger.handlers:
         ch = logging.StreamHandler()
         ch.setLevel(log_level)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        ch.setFormatter(formatter)
+        ch.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         logger.addHandler(ch)
-
     return logger
 
 
-def move_file_to_processed(file_path):
-    """Move processed file to processed directory"""
-    return _move_file(file_path, 'processed')
-
-def move_file_to_error(file_path):
-    """Move error file to error directory"""
-    return _move_file(file_path, 'error')
-
 def _move_file(file_path, destination):
-    """Move file to specified directory"""
     try:
-        file_name = Path(file_path).name
+        name = Path(file_path).name
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        new_name = f"{timestamp}_{file_name}"
-        
         dest_dir = Path(f"data/{destination}")
         dest_dir.mkdir(parents=True, exist_ok=True)
-        
-        dest_path = dest_dir / new_name
-        shutil.move(file_path, dest_path)
-        
-        return dest_path
+        dest = dest_dir / f"{timestamp}_{name}"
+        shutil.move(file_path, dest)
+        return dest
     except Exception as e:
-        logging.error(f"Failed to move file {file_path}: {str(e)}")
+        logging.error(f"Failed to move {file_path}: {e}")
         return None
 
-def log_processing_result(file_path, results):
-    """Log final processing results and move file accordingly"""
-    total_rows = len(results)
-    successful_rows = len([r for r in results if r['status'] == 'success'])
-    failed_rows = total_rows - successful_rows
-    
-    logger = setup_logger(__name__)
-    
-    if failed_rows == 0:
-        logger.info(f"Successfully processed {successful_rows}/{total_rows} rows")
-        if file_path:
-            move_file_to_processed(file_path)
+
+def log_processing_result(upload_id, results, *, archive_files=False, file_path=None):
+    """
+    Persist per-invoice results to Postgres. This replaces the old file-move
+    audit trail. If `archive_files=True` AND `file_path` is provided, also
+    moves the temp file to data/processed or data/error (local dev only).
+    """
+    total = len(results)
+    success = len([r for r in results if r["status"] == "success"])
+    failed = total - success
+    log = setup_logger(__name__)
+
+    try:
+        import db
+        for r in results:
+            db.record_invoice(
+                upload_id=upload_id,
+                invoice_number=str(r["invoice"]),
+                transaction_type=r.get("type", "sales_receipt"),
+                status=r["status"],
+                qb_id=r.get("transaction_id"),
+                error_message=r.get("error"),
+            )
+        status = "success" if failed == 0 else ("partial" if success else "failed")
+        db.finalize_upload(upload_id, status=status, total_invoices=total,
+                           succeeded=success, failed=failed, log=None)
+    except Exception as e:
+        log.error("Failed to persist processing result: %s", e, exc_info=True)
+
+    if archive_files and file_path:
+        (_move_file(file_path, "processed") if failed == 0
+         else _move_file(file_path, "error"))
+
+    if failed == 0:
+        log.info("Processed %d/%d invoices", success, total)
     else:
-        logger.error(f"Processing completed with errors: {successful_rows} successful, {failed_rows} failed")
-        if file_path:
-            move_file_to_error(file_path)
-        
-        # Log detailed errors
-        for result in results:
-            if result['status'] == 'error':
-                logger.error(f"Invoice {result['invoice']}: {result['error']}")
+        log.warning("Finished with %d ok, %d failed", success, failed)

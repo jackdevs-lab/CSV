@@ -1,20 +1,26 @@
-# app.py  ← FINAL FREE VERSION (NO REDIS, NO WORKER, HANDLES 5000+ ROWS)
+# app.py
+"""
+Flask entrypoint. Sync processing, DB-backed auth & audit.
+"""
 from flask import Flask, request, render_template, jsonify, redirect, session
 from pathlib import Path
 import os
+import sys
 import logging
-from io import StringIO
-import pandas as pd
-import time
 import tempfile
+from io import StringIO
 from decimal import Decimal, ROUND_HALF_UP
+
+import pandas as pd
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 BASE_DIR = Path(__file__).resolve().parent
-import sys
 sys.path.append(str(BASE_DIR / "src"))
+
+import db
+db.init_db()  # idempotent; safe every boot
 
 from src.csv_parser import CSVParser
 from src.mapper import TransactionMapper
@@ -26,26 +32,25 @@ from src.qb_auth import QuickBooksAuth, QuickBooksAuthError
 from src.qb_client import QuickBooksClient
 from src.logger import setup_logger, log_processing_result
 
-app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "templates"),
+    static_folder=str(BASE_DIR / "static"),
+)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 
 logger = setup_logger(__name__)
 log_stream = StringIO()
-handler = logging.StreamHandler(log_stream)
-handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logger.addHandler(handler)
+_handler = logging.StreamHandler(log_stream)
+_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(_handler)
 
 
+# ---------- auth gate ----------
 def require_connection():
-    """
-    Validate the QuickBooks connection before allowing dashboard/upload access.
-    Returns True if healthy. On connexion failure (esp. a dead refresh token),
-    clears the session and the caller redirects to /login.
-    """
     try:
-        auth = QuickBooksAuth()
-        auth.get_valid_access_token()
+        QuickBooksAuth().get_valid_access_token()
         return True
     except QuickBooksAuthError as e:
         logger.error(f"Connection validation failed: {e}")
@@ -57,8 +62,12 @@ def require_connection():
         return False
 
 
-# ←←← CHUNKED VERSION (FREE FOREVER) ←←←
-def process_csv_file(file_path):
+# ---------- chunked processing ----------
+def process_csv_file(file_path, upload_id):
+    """
+    Reads the CSV, groups by Invoice No., and pushes each invoice to QB.
+    Records every invoice outcome to the DB (idempotent), no file moves.
+    """
     try:
         qb_auth = QuickBooksAuth()
         qb_client = QuickBooksClient(qb_auth)
@@ -71,295 +80,202 @@ def process_csv_file(file_path):
         df = parser.parse_file(file_path)
         logger.info(f"Successfully parsed CSV with {len(df)} rows")
 
-        required_columns = ['Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service',
-                            'Description', 'Total Amount', 'Quantity', 'Unit Cost',
-                            'Service Date', 'Mode of Payment', 'Is Insurance?']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            logger.error(f"Missing required columns: {missing_columns}")
+        required_columns = [
+            'Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service',
+            'Description', 'Total Amount', 'Quantity', 'Unit Cost',
+            'Service Date', 'Mode of Payment', 'Is Insurance?',
+        ]
+        missing = [c for c in required_columns if c not in df.columns]
+        if missing:
+            logger.error(f"Missing required columns: {missing}")
             return False, log_stream.getvalue()
 
         results = []
-        grouped = df.groupby('Invoice No.')
-        invoice_groups = list(grouped)
+        invoice_groups = list(df.groupby('Invoice No.'))
         total_invoices = len(invoice_groups)
         logger.info(f"Found {total_invoices} unique invoices – starting chunked processing")
 
-        chunk_size = 50
-        for chunk_start in range(0, total_invoices, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, total_invoices)
-            current_chunk = invoice_groups[chunk_start:chunk_end]
-            logger.info(f"Processing chunk {(chunk_start//chunk_size)+1}: invoices {chunk_start+1}–{chunk_end}")
+        # helpers -----------------------------------------------------------
+        def parse_money(value):
+            if pd.isna(value):
+                return Decimal('0.00')
+            s = ''.join(c for c in str(value).strip() if c in '0123456789.-')
+            return Decimal(s) if s and s not in {'.', '-'} else Decimal('0.00')
 
-            def parse_money(value):
-                if pd.isna(value): return Decimal('0.00')
-                s = ''.join(c for c in str(value).strip() if c in '0123456789.-')
-                return Decimal(s) if s and s not in {'.', '-'} else Decimal('0.00')
+        def build_lines(group, invoice_num, for_invoice=False):
+            lines = []
+            inventory_adjustments = []
+            total_value = Decimal('0.00')
 
-            def calculate_markup_factor(row):
-                try:
-                    qty = Decimal(str(row['Quantity']))
-                    unit_cost = parse_money(row['Unit Cost'])
-                    total_amount = parse_money(row['Total Amount'])
-                    if qty <= 0 or unit_cost <= 0 or total_amount <= 0: return Decimal('1.0')
-                    factor = total_amount / (unit_cost * qty)
-                    return factor.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
-                except: return Decimal('1.0')
+            for _, row in group.iterrows():
+                qty_csv = Decimal(str(row['Quantity'] or '1'))
+                total_amount_csv = parse_money(row['Total Amount'])
+                description = str(row.get('Description', '') or '').strip()
 
-            def build_lines(group, invoice_num, for_invoice=False):
-                """
-                ZERO-DOLLAR LINE POLICY.
+                total_value += total_amount_csv
+                if total_amount_csv <= 0:
+                    continue
 
-                The EMR bundles multiple services into one comma-separated
-                'Product / Service' string. Instead of forcing that whole string
-                into one broken line item:
+                prod_svc_raw = str(row.get('Product / Service', '') or '').strip()
+                items = [i.strip() for i in prod_svc_raw.split(',') if i.strip()]
+                if not items:
+                    items = [prod_svc_raw]
 
-                  1. SPLIT & EXTRACT  — split the Product / Service string on
-                     commas into distinct items.
-                  2. ZERO-DOLLAR ITEMIZATION — emit one $0.00 line item per
-                     extracted item (Qty=1, UnitPrice=$0.00) so the full medical
-                     record is captured on the receipt.
-                  3. TOTAL VALUE LINE — QuickBooks computes the transaction total
-                     from its line items, so we append ONE final line
-                     ("Total Visit Charges") carrying the real Total Amount.
-
-                Error isolation: a failure to resolve/append ONE split item is
-                logged and skipped so the remaining items (and the invoice)
-                still get created.
-                """
-                lines = []
-                inventory_adjustments = []  # Collect pharmacy lines that need real qty deduction
-                total_value = Decimal('0.00')  # Accumulate the real total for the whole invoice
-
-                for _, row in group.iterrows():
-                    # === DEBUG: PRE-BUILD STATE (row passed into find_or_create_product) ===
-                    logger.info(f"PRE-BUILD row for invoice {invoice_num}: {row.to_dict()}")
-
-                    # === DEBUG: values used before product resolution ===
-                    logger.info(
-                        "PRE-BUILD values | invoice=%s | Product/Service=%r | Description=%r | Qty=%r | UnitCost=%r | TotalAmount=%r",
-                        invoice_num,
-                        row.get('Product / Service'),
-                        row.get('Description'),
-                        row.get('Quantity'),
-                        row.get('Unit Cost'),
-                        row.get('Total Amount'),
-                    )
-
-                    qty_csv = Decimal(str(row['Quantity'] or '1'))
-                    total_amount_csv = parse_money(row['Total Amount'])
-                    unit_cost = parse_money(row['Unit Cost'])
-                    description = str(row.get('Description', '') or '').strip()
-
-                    # Accumulate the real transaction total for the whole invoice group.
-                    total_value += total_amount_csv
-
-                    if total_amount_csv <= 0:
-                        logger.warning(f"PRE-BUILD skipping row (total_amount<=0) invoice {invoice_num}: {row.to_dict()}")
-                        continue
-
-                    # ——————— 1. SPLIT & EXTRACT ———————
-                    prod_svc_raw = str(row.get('Product / Service', '') or '').strip()
-                    items = [item.strip() for item in prod_svc_raw.split(',') if item.strip()]
-                    if not items:
-                        items = [prod_svc_raw]  # nothing usable → keep the raw value as one item
-
-                    # ——————— 2. ZERO-DOLLAR ITEMIZATION ———————
-                    for item in items:
-                        try:
-                            item_row = row.copy()
-                            item_row['Product / Service'] = item
-
-                            # Resolve each unique comma-split item by its ACTUAL name so
-                            # QuickBooks shows the real medical service under Product/Service
-                            # instead of the generic 'Service' fallback.
-                            item_id = product_service.find_or_create_product(item, invoice_num)
-
-                            # === DEBUG: resolved item id ===
-                            logger.info(f"PRE-BUILD resolved item_id for invoice {invoice_num}, item={item!r}: {item_id!r}")
-
-                            # Zero-dollar line: Qty=1, UnitPrice=$0.00, Amount=$0.00.
-                            # Use the unique ItemRef.value; QuickBooks renders the catalog
-                            # name tied to that ID (ItemRef.name is ignored by the API).
-                            # Intentionally OMIT the outer "Description" key so QuickBooks
-                            # uses its native catalog description for this ItemRef.
-                            sales_item_detail = {
+                for item in items:
+                    try:
+                        item_row = row.copy()
+                        item_row['Product / Service'] = item
+                        item_id = product_service.find_or_create_product(item, invoice_num)
+                        line = {
+                            "DetailType": "SalesItemLineDetail",
+                            "Amount": 0.0,
+                            "SalesItemLineDetail": {
                                 "ItemRef": {"value": str(item_id)},
                                 "Qty": 1.0,
                                 "UnitPrice": 0.0,
-                                "TaxCodeRef": {"value": "6"}
-                            }
-
-                            line = {
-                                "DetailType": "SalesItemLineDetail",
-                                "Amount": 0.0,
-                                "SalesItemLineDetail": sales_item_detail
-                            }
-                            lines.append(line)
-
-                            # ——————— IF PHARMACY + INSURANCE → REMEMBER TO DEDUCT REAL QTY LATER ———————
-                            if for_invoice and product_service.is_pharmacy_item(item_row) and qty_csv > 1:
-                                inventory_adjustments.append({
-                                    "item_id": item_id,
-                                    "real_qty": int(qty_csv),
-                                    "description": description or item
-                                })
-                        except Exception as e:
-                            # Error isolation: skip this item but keep going with the rest.
-                            logger.warning(
-                                f"PRE-BUILD failed to process item {item!r} for invoice {invoice_num}: {e} — skipping this item"
-                            )
-                            continue
-
-                # ——————— AFTER TRANSACTION IS CREATED → DEDUCT REAL STOCK FOR INSURANCE PHARMACY ITEMS ———————
-                if inventory_adjustments and for_invoice:
-                    # We do this in invoice_service.create_or_update_invoice() — see step 3 below
-                    group._inventory_adjustments = inventory_adjustments  # monkey-patch the group
-
-                # ——————— 3. TOTAL VALUE LINE ———————
-                if lines and total_value > 0:
-                    # Resolve the total line to a real catalog item so it does not
-                    # fall back to the generic 'Service'. QuickBooks will render the
-                    # item name tied to this ID.
-                    total_item_id = product_service.find_or_create_product("Total Visit Charges", invoice_num)
-                    lines.append({
-                        "DetailType": "SalesItemLineDetail",
-                        "Amount": float(total_value.quantize(Decimal('0.01'))),
-                        "Description": "Total Visit Charges",
-                        "SalesItemLineDetail": {
-                            "ItemRef": {"value": str(total_item_id)},
-                            "Qty": 1.0,
-                            "UnitPrice": float(total_value.quantize(Decimal('0.01'))),
-                            "TaxCodeRef": {"value": "6"}
+                                "TaxCodeRef": {"value": "6"},
+                            },
                         }
-                    })
-                    logger.info(f"PRE-BUILD appended 'Total Visit Charges' line of {total_value} for invoice {invoice_num}")
+                        lines.append(line)
+                        if for_invoice and product_service.is_pharmacy_item(item_row) and qty_csv > 1:
+                            inventory_adjustments.append({
+                                "item_id": item_id,
+                                "real_qty": int(qty_csv),
+                                "description": description or item,
+                            })
+                    except Exception as e:
+                        logger.warning(f"Item {item!r} failed on {invoice_num}: {e} — skipping")
 
-                return lines
+            if inventory_adjustments and for_invoice:
+                group._inventory_adjustments = inventory_adjustments
 
-            for invoice_num, group in current_chunk:
+            if lines and total_value > 0:
+                total_item_id = product_service.find_or_create_product(
+                    "Total Visit Charges", invoice_num)
+                lines.append({
+                    "DetailType": "SalesItemLineDetail",
+                    "Amount": float(total_value.quantize(Decimal('0.01'))),
+                    "Description": "Total Visit Charges",
+                    "SalesItemLineDetail": {
+                        "ItemRef": {"value": str(total_item_id)},
+                        "Qty": 1.0,
+                        "UnitPrice": float(total_value.quantize(Decimal('0.01'))),
+                        "TaxCodeRef": {"value": "6"},
+                    },
+                })
+            return lines
+
+        # main loop ---------------------------------------------------------
+        chunk_size = 50
+        for start in range(0, total_invoices, chunk_size):
+            end = min(start + chunk_size, total_invoices)
+            chunk = invoice_groups[start:end]
+            logger.info(f"Processing chunk {(start//chunk_size)+1}: invoices {start+1}–{end}")
+
+            for invoice_num, group in chunk:
                 try:
                     mapper = TransactionMapper()
-                    is_insurance = mapper.is_insurance_transaction(group)   # True if "Is Insurance?" = Yes
+                    is_insurance = mapper.is_insurance_transaction(group)
 
-                    # ———— FIXED INSURANCE LOGIC ————
                     if is_insurance:
-                        insurance_name = mapper.extract_insurance_name(group)   # pulls from "Mode of Payment"
-                        if insurance_name and insurance_name.strip():
-                            # Bill to insurance company → create INVOICE
+                        ins_name = mapper.extract_insurance_name(group)
+                        if ins_name and ins_name.strip():
                             customer_id = customer_service.find_or_create_customer(
-                                group,
-                                mapper,
-                                customer_type="insurance",
-                                insurance_name=insurance_name.strip()
-                            )
-                            transaction_type = "invoice"          # ← force invoice
-                            logger.info(f"INSURANCE → INVOICE for '{insurance_name.strip()}' (Invoice #{invoice_num})")
+                                group, mapper, customer_type="insurance",
+                                insurance_name=ins_name.strip())
+                            transaction_type = "invoice"
                         else:
-                            # Insurance flag but no name → fallback to patient as cash patient
-                            customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
+                            customer_id = customer_service.find_or_create_customer(
+                                group, mapper, customer_type="patient")
                             transaction_type = "sales_receipt"
-                            logger.info(f"Insurance flag but no name → Sales Receipt for patient (Invoice #{invoice_num})")
                     else:
-                        # Normal cash / MPESA / etc.
-                        customer_id = customer_service.find_or_create_customer(group, mapper, customer_type="patient")
+                        customer_id = customer_service.find_or_create_customer(
+                            group, mapper, customer_type="patient")
                         transaction_type = "sales_receipt"
-                        logger.info(f"Cash patient → Sales Receipt (Invoice #{invoice_num})")
-                    # ———————————————
 
-                    delay = min(2.0, max(0.6, 6600.0 / total_invoices))
-                    time.sleep(delay)
+                    # Idempotency
+                    if db.is_already_processed(str(invoice_num), transaction_type):
+                        logger.info(f"Skip {invoice_num} ({transaction_type}): already processed")
+                        results.append({"invoice": invoice_num, "status": "success",
+                                        "transaction_id": "EXISTS", "type": transaction_type})
+                        continue
 
-                    # ←←← DELETE OR COMMENT THE NEXT LINE — it was overriding everything!
-                    # transaction_type = mapper.determine_transaction_type(group)
+                    delay = min(0.9, max(0.2, 900.0 / max(total_invoices, 1)))
+                    import time; time.sleep(delay)
 
-                    lines = build_lines(group, invoice_num, for_invoice=(transaction_type == "invoice"))
+                    lines = build_lines(group, invoice_num,
+                                        for_invoice=(transaction_type == "invoice"))
                     if not lines:
                         logger.warning(f"No lines for invoice {invoice_num}")
                         continue
 
                     if transaction_type == "invoice":
-                        result = invoice_service.create_or_update_invoice(group, customer_id, lines)
-                        logger.info(f"Invoice created → QB ID: {result.get('Invoice', {}).get('Id')}")
+                        result = invoice_service.create_or_update_invoice(
+                            group, customer_id, lines)
+                        qb_id = (result.get("Invoice") or {}).get("Id", "EXISTS")
                     else:
-                        result = receipt_service.create_sales_receipt(group, customer_id, lines)
-                        logger.info(f"Sales Receipt created → QB ID: {result.get('SalesReceipt', {}).get('Id')}")
+                        result = receipt_service.create_sales_receipt(
+                            group, customer_id, lines)
+                        qb_id = (result.get("SalesReceipt") or {}).get("Id", "EXISTS")
 
-                    results.append({
-                        "invoice": invoice_num,
-                        "status": "success",
-                        "transaction_id": result.get('Invoice', result.get('SalesReceipt', {})).get('Id'),
-                        "type": transaction_type
-                    })
+                    db.record_invoice(upload_id, str(invoice_num), transaction_type,
+                                      "success", qb_id=qb_id)
+                    results.append({"invoice": invoice_num, "status": "success",
+                                    "transaction_id": qb_id, "type": transaction_type})
 
                 except Exception as e:
-                    logger.error(f"Error on invoice {invoice_num}: {str(e)}", exc_info=True)
-                    results.append({"invoice": invoice_num, "status": "error", "error": str(e)})
+                    logger.error(f"Error on invoice {invoice_num}: {e}", exc_info=True)
+                    db.record_invoice(upload_id, str(invoice_num), "unknown",
+                                      "error", error_message=str(e))
+                    results.append({"invoice": invoice_num, "status": "error",
+                                    "error": str(e)})
 
-            logger.info(f"Chunk finished – {chunk_end}/{total_invoices} done")
+        # UI log (concise)
+        has_real_error = any(
+            "Failed to refresh QuickBooks token" in l or "400 Client Error" in l
+            for l in log_stream.getvalue().splitlines()
+        )
+        ui_log = "\n".join(log_stream.getvalue().splitlines()[-500:])
 
-        all_logs = log_stream.getvalue()
-        wanted_lines = []
-        has_real_error = False
-
-        for line in all_logs.splitlines():
-            if "Failed to refresh QuickBooks token" in line or "400 Client Error" in line:
-                has_real_error = True
-            if any(phrase in line for phrase in [
-                "Successfully parsed CSV with",
-                "Found ", "unique invoices",
-                "Processing chunk",
-                "Chunk finished"
-            ]):
-                clean_line = line.split(" - ", 2)[-1] if " - " in line else line
-                wanted_lines.append(clean_line)
-
-        if has_real_error:
-            ui_log = "\n".join(wanted_lines) + "\n\nFailed: QuickBooks connection lost\nReconnect your account and try again"
-        else:
-            ui_log = "\n".join(wanted_lines) + "\n\nAll invoices processed successfully!"
-
-        log_processing_result(file_path, results)
-        return not has_real_error, ui_log
+        log_processing_result(upload_id, results, archive_files=False)
+        return (not has_real_error), ui_log
 
     except QuickBooksAuthError as e:
-        logger.error(f"QuickBooks auth failed during processing: {e}", exc_info=True)
-        return False, f"QuickBooks authentication failed: {e}\nPlease reconnect your account at /login"
+        logger.error(f"QuickBooks auth failed: {e}", exc_info=True)
+        return False, f"QuickBooks authentication failed: {e}\nReconnect at /login"
     except Exception as e:
-        logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
+        logger.error(f"Failed to process CSV: {e}", exc_info=True)
         return False, log_stream.getvalue()
 
 
+# ---------- routes ----------
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if not require_connection():
-        return jsonify({
-            'success': False,
-            'error': 'QuickBooks connection lost. Please reconnect at /login.'
-        }), 401
-
+        return jsonify({'success': False,
+                        'error': 'QuickBooks connection lost. Please reconnect at /login.'}), 401
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file'})
-
-    file = request.files['file']
-    if not file or not file.filename.lower().endswith('.csv'):
+    f = request.files['file']
+    if not f or not f.filename.lower().endswith('.csv'):
         return jsonify({'success': False, 'error': 'CSV only'})
 
+    upload_id = db.create_upload(f.filename)
     with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
-        file.save(tmp.name)
+        f.save(tmp.name)
         try:
-            success, logs = process_csv_file(tmp.name)
+            ok, logs = process_csv_file(tmp.name, upload_id)
         finally:
-            try:
-                os.unlink(tmp.name)
-            except FileNotFoundError:
-                pass
+            try: os.unlink(tmp.name)
+            except FileNotFoundError: pass
 
     return jsonify({
-        'success': success,
-        'message': 'Done!' if success else 'Failed',
-        'logs': logs
+        'success': ok,
+        'message': 'Done!' if ok else 'Failed',
+        'upload_id': upload_id,
+        'logs': logs,
     })
+
 
 @app.route('/status')
 def status():
@@ -367,54 +283,60 @@ def status():
         return jsonify({'connected': False, 'reason': 'invalid_refresh'})
     return jsonify({'connected': True})
 
+
 @app.route('/')
 def index():
     if not require_connection():
         return redirect('/login')
     return render_template('index.html')
 
+
 @app.route('/login')
 def login():
-    auth = QuickBooksAuth()
-    url, _ = auth.get_authorization_url()
+    url, _ = QuickBooksAuth().get_authorization_url()
     return redirect(url)
+
 
 @app.route('/callback')
 def callback():
-    auth_response_url = request.url  # Full URL QuickBooks redirected to
-
     if 'error' in request.args:
-        error = request.args.get('error')
-        description = request.args.get('error_description', '')
-        return f"QuickBooks authorization failed: {error} – {description}", 400
-
+        return (f"QuickBooks authorization failed: "
+                f"{request.args.get('error')} – {request.args.get('error_description','')}", 400)
     if 'code' not in request.args and 'state' not in request.args:
         return "Missing authorization code from QuickBooks", 400
 
-    auth = QuickBooksAuth()
-
     try:
-        tokens = auth.fetch_tokens(auth_response_url)
-
-        realm_id = tokens.get("realmId")
+        tokens = QuickBooksAuth().fetch_tokens(request.url)
         session['connected'] = True
-        session['realm_id'] = realm_id
-        logger.info("OAuth2 flow completed successfully!")
-        logger.info(f"Company ID (realmId): {realm_id}")
-        logger.info("A new refresh token has been printed in the logs above.")
-        logger.info("Copy the new QB_REFRESH_TOKEN and update it in your environment variables.")
-        logger.info("Also set QB_REALM_ID if it's not already set.")
-
+        session['realm_id'] = tokens.get("realmId")
+        logger.info("OAuth2 flow completed successfully (realmId=%s)", tokens.get("realmId"))
         return redirect('/')
-
     except Exception as e:
         logger.error("Callback failed", exc_info=True)
-        return f"Authentication failed: {str(e)}", 500
+        return f"Authentication failed: {e}", 500
+
+
+@app.route('/disconnect')
+def disconnect():
+    return render_template('disconnect.html')
+
+
+@app.route('/eula')
+def eula():
+    return render_template('eula.html')
+
+
+@app.route('/privacy')
+def privacy():
+    return render_template('privacy.html')
+
 
 @app.errorhandler(404)
 def not_found(e):
-    if request.path.startswith('/static/'): return "Not found", 404
+    if request.path.startswith('/static/'):
+        return "Not found", 404
     return render_template('index.html'), 200
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)))

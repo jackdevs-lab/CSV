@@ -1,25 +1,18 @@
 # src/qb_auth.py
 import os
 import time
+from datetime import datetime, timezone
 import requests
-import json
 from urllib.parse import urlparse, parse_qs
 from src.logger import setup_logger
+import db
 
 logger = setup_logger(__name__)
 
 
 class QuickBooksAuthError(Exception):
-    """
-    Raised when the OAuth2 token exchange fails.
-
-    Attributes:
-        error_code:              Intuit error code (e.g. 'invalid_grant', 'invalid_client')
-        status_code:             HTTP status code from the token endpoint
-        refresh_token_invalid:   True when the refresh token itself is expired/revoked
-                                 and the user must re-authenticate at /login
-    """
-    def __init__(self, message, error_code=None, status_code=None, refresh_token_invalid=False):
+    def __init__(self, message, error_code=None, status_code=None,
+                 refresh_token_invalid=False):
         super().__init__(message)
         self.error_code = error_code
         self.status_code = status_code
@@ -27,278 +20,143 @@ class QuickBooksAuthError(Exception):
 
 
 class QuickBooksAuth:
-    """
-    Bulletproof QuickBooks OAuth2 handler
-    - Stores ONLY the refresh token in a persistent file (or env as fallback)
-    - Everything else is generated on-the-fly
-    - Works on Render with attached disk for persistence
-    """
+    TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+    AUTH_URL = "https://appcenter.intuit.com/connect/oauth2"
 
     def __init__(self):
         self.client_id = os.getenv("QB_CLIENT_ID")
         self.client_secret = os.getenv("QB_CLIENT_SECRET")
         self.redirect_uri = os.getenv("QB_REDIRECT_URI")
-        self.environment = os.getenv("QB_ENVIRONMENT", "production").lower()
-
         if not all([self.client_id, self.client_secret, self.redirect_uri]):
-            raise ValueError("Missing QB_CLIENT_ID, QB_CLIENT_SECRET, or QB_REDIRECT_URI")
+            raise ValueError("Missing QB_CLIENT_ID/SECRET/REDIRECT_URI")
+        self._tokens = None
 
-        self.token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
-        self.authorization_base_url = "https://appcenter.intuit.com/connect/oauth2"
-
-        # Persistent token file (mount a disk on Render at /data and set TOKEN_FILE=/data/tokens.json)
-        self.token_file = os.getenv("TOKEN_FILE", "tokens.json")
-
-        # Create directory if needed (skip if dirname is empty, e.g., file in cwd)
-        dir_path = os.path.dirname(self.token_file)
-        if dir_path and not os.path.exists(dir_path):
-            os.makedirs(dir_path, exist_ok=True)
-
-        # Load refresh token from file if available, else from env
-        self.permanent_refresh_token = self._get_stored_value("qb_refresh_token") or os.getenv("QB_REFRESH_TOKEN")
-        if not self.permanent_refresh_token:
-            raise ValueError("QB_REFRESH_TOKEN not set in file or environment. Re-authenticate at /login")
-
-        # Runtime tokens (generated from permanent refresh token)
+    def _load(self):
+        row = db.get_token_row()
+        if not row:
+            raise QuickBooksAuthError(
+                "No QuickBooks tokens in DB. Visit /login to authenticate.",
+                refresh_token_invalid=True)
         self._tokens = {
-            "access_token": None,
-            "refresh_token": self.permanent_refresh_token,
-            "expires_at": 0,  # Force first refresh
-            "realmId": self._get_stored_value("qb_realm_id") or os.getenv("QB_REALM_ID")  # Optional: can be in env or from auth
+            "access_token": row["access_token"],
+            "refresh_token": row["refresh_token"],
+            "expires_at": row["access_token_expires_at"].timestamp()
+                          if row["access_token_expires_at"] else 0,
+            "realmId": row["realm_id"],
+            "refresh_token_issued_at": row["refresh_token_issued_at"].timestamp(),
         }
-        self._lock = False
+        return self._tokens
 
-    def _get_stored_value(self, key):
-        if os.path.exists(self.token_file):
-            try:
-                with open(self.token_file, 'r') as f:
-                    data = json.load(f)
-                    return data.get(key)
-            except Exception as e:
-                logger.error(f"Failed to read token file: {e}")
-        return None
-
-    def _set_stored_value(self, key, value):
-        data = {}
-        if os.path.exists(self.token_file):
-            try:
-                with open(self.token_file, 'r') as f:
-                    data = json.load(f)
-            except Exception as e:
-                logger.error(f"Failed to read token file for update: {e}")
-        data[key] = value
-        try:
-            with open(self.token_file, 'w') as f:
-                json.dump(data, f)
-            logger.info(f"Updated {key} in token file")
-        except Exception as e:
-            logger.error(f"Failed to write token file: {e}")
+    def _persist(self, *, refresh_token, refresh_token_issued_at,
+                 access_token=None, access_token_expires_at=None, realm_id=None):
+        db.upsert_token_row(
+            realm_id=realm_id or self._tokens["realmId"],
+            refresh_token=refresh_token,
+            refresh_token_issued_at=datetime.fromtimestamp(
+                refresh_token_issued_at, tz=timezone.utc),
+            access_token=access_token,
+            access_token_expires_at=(datetime.fromtimestamp(
+                access_token_expires_at, tz=timezone.utc)
+                if access_token_expires_at else None),
+        )
 
     def _refresh_token_if_needed(self):
-        now = time.time()
-        expires_at = self._tokens.get("expires_at", 0)
-
-        # Force refresh if expired or within 5 minutes
-        if expires_at > now + 300:
+        t = self._load()
+        if t["expires_at"] > time.time() + 300:
             return
+        logger.info("Refreshing QuickBooks access token...")
+        health = self.refresh_token_health()
+        logger.info("Refresh token health: %s (age_days=%s)",
+                    health.get("reason"), health.get("age_days"))
 
-        if self._lock:
-            while self._lock:
-                time.sleep(0.1)
-            return
+        r = requests.post(self.TOKEN_URL,
+            headers={"Accept": "application/json",
+                     "Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": t["refresh_token"],
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            }, timeout=30)
 
-        self._lock = True
-        try:
-            logger.info("Refreshing QuickBooks access token...")
-            # Log token age so we can tell whether invalid_grant is age-out vs revoke.
-            health = self.refresh_token_health()
-            logger.info(
-                "Refresh token health: status=%s reason=%s age_days=%s",
-                health.get("status"),
-                health.get("reason"),
-                health.get("age_days"),
-            )
-            # Intuit's bearer token endpoint requires client credentials IN THE BODY.
-            # Do NOT send an HTTP Basic auth header — Intuit rejects it with
-            # {"error":"invalid_client"} (HTTP 401/400).
-            response = requests.post(
-                self.token_url,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": self._tokens["refresh_token"],
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                },
-                timeout=30,
-            )
+        if r.status_code >= 400:
+            error_code, desc = None, r.text
+            try:
+                p = r.json()
+                error_code = p.get("error")
+                desc = p.get("error_description") or desc
+            except Exception:
+                pass
+            invalid = error_code in ("invalid_grant", "invalid_token",
+                                     "token_expired", "unauthorized_client")
+            msg = f"Token refresh failed (HTTP {r.status_code}): {error_code} - {desc}"
+            if invalid:
+                msg += "\nRefresh token expired/revoked. Re-authenticate at /login."
+            raise QuickBooksAuthError(msg, error_code=error_code,
+                                      status_code=r.status_code,
+                                      refresh_token_invalid=invalid)
 
-            # Capture the real Intuit error payload instead of a bare 400.
-            if response.status_code >= 400:
-                error_code = None
-                error_desc = response.text
-                try:
-                    payload = response.json()
-                    error_code = payload.get("error")
-                    error_desc = payload.get("error_description") or error_desc
-                except Exception:
-                    pass
+        new = r.json()
+        expires_in = int(new.get("expires_in", 3600))
+        new_refresh = new.get("refresh_token")
+        rotated = bool(new_refresh and new_refresh != t["refresh_token"])
 
-                # An expired/revoked refresh token cannot be recovered without re-auth.
-                refresh_token_invalid = error_code in (
-                    "invalid_grant",
-                    "invalid_token",
-                    "token_expired",
-                    "unauthorized_client",
-                )
-
-                logger.error(
-                    "QuickBooks token refresh failed | HTTP %s | error=%s | description=%s",
-                    response.status_code,
-                    error_code,
-                    error_desc,
-                )
-
-                message = (
-                    "QuickBooks OAuth token refresh failed (HTTP {status}). "
-                    "Intuit error: {code} - {desc}".format(
-                        status=response.status_code,
-                        code=error_code or "unknown",
-                        desc=error_desc,
-                    )
-                )
-                if refresh_token_invalid:
-                    message += (
-                        "\nThe stored refresh token is expired or revoked. "
-                        "Re-authenticate at /login to mint a fresh refresh token."
-                    )
-
-                raise QuickBooksAuthError(
-                    message,
-                    error_code=error_code,
-                    status_code=response.status_code,
-                    refresh_token_invalid=refresh_token_invalid,
-                )
-
-            new_tokens = response.json()
-
-            expires_in = int(new_tokens.get("expires_in", 3600))
-
-            new_refresh = new_tokens.get("refresh_token")
-            if new_refresh and new_refresh != self._tokens["refresh_token"]:
-                logger.info("New refresh token received - updating storage")
-                self._set_stored_value("qb_refresh_token", new_refresh)
-                # A rotated refresh token is effectively a fresh 100-day grant.
-                self._set_stored_value("qb_refresh_token_issued_at", int(time.time()))
-
-            self._tokens.update({
-                "access_token": new_tokens["access_token"],
-                "refresh_token": new_refresh or self._tokens["refresh_token"],
-                "expires_at": now + expires_in - 60,
-            })
-
-            logger.info("QuickBooks token refreshed successfully")
-            logger.info(f"Current QuickBooks access token: {self._tokens['access_token']}")
-
-        except Exception as e:
-            logger.error(f"Failed to refresh QuickBooks token: {e}", exc_info=True)
-            raise
-        finally:
-            self._lock = False
+        self._persist(
+            refresh_token=new_refresh or t["refresh_token"],
+            refresh_token_issued_at=(time.time() if rotated
+                                     else t["refresh_token_issued_at"]),
+            access_token=new["access_token"],
+            access_token_expires_at=time.time() + expires_in - 60,
+        )
+        self._tokens = None
+        logger.info("Token refreshed successfully")
 
     def get_valid_access_token(self):
-        self._refresh_token_if_needed()
-        return self._tokens["access_token"]
-
-    def log_access_token(self):
-        access_token = self._tokens.get("access_token")
-        if access_token:
-            logger.info(f"Current QuickBooks access token: {access_token}")
-        else:
-            logger.info("No QuickBooks access token has been generated yet.")
+        t = self._load()
+        if t["expires_at"] <= time.time() + 300:
+            self._refresh_token_if_needed()
+            t = self._load()
+        return t["access_token"]
 
     def get_realm_id(self):
-        return self._tokens.get("realmId")
+        return self._load()["realmId"]
 
     def refresh_token_health(self):
-        """
-        Return a dict describing the stored refresh token's likely health.
-
-        reason codes:
-          ok               — a refresh token exists and is within Intuit's 100-day window
-          no_token         — no refresh token is stored/configured
-          aged_out         — refresh token is older than Intuit's 100-day absolute limit
-          unknown_age      — a token exists but we don't know when it was issued
-        """
-        if not self.permanent_refresh_token:
-            return {"status": "no_token", "reason": "no_token", "age_days": None}
-
-        issued_at = self._get_stored_value("qb_refresh_token_issued_at")
-        if not issued_at:
-            return {"status": "unknown", "reason": "unknown_age", "age_days": None}
-
         try:
-            age_days = (time.time() - float(issued_at)) / 86400.0
-        except Exception:
-            return {"status": "unknown", "reason": "unknown_age", "age_days": None}
-
+            t = self._load()
+        except QuickBooksAuthError:
+            return {"status": "no_token", "reason": "no_token", "age_days": None}
+        age_days = (time.time() - t["refresh_token_issued_at"]) / 86400.0
         if age_days >= 100.0:
-            return {"status": "invalid", "reason": "aged_out", "age_days": round(age_days, 1)}
-
+            return {"status": "invalid", "reason": "aged_out",
+                    "age_days": round(age_days, 1)}
         return {"status": "ok", "reason": "ok", "age_days": round(age_days, 1)}
 
-    # OAuth flow — only used once every 100 days or on new setup
     def get_authorization_url(self):
         from requests_oauthlib import OAuth2Session
-        oauth = OAuth2Session(
-            self.client_id,
-            redirect_uri=self.redirect_uri,
-            scope=["com.intuit.quickbooks.accounting"]
-        )
-        url, state = oauth.authorization_url(self.authorization_base_url)
-        return url, state
+        oauth = OAuth2Session(self.client_id, redirect_uri=self.redirect_uri,
+                              scope=["com.intuit.quickbooks.accounting"])
+        return oauth.authorization_url(self.AUTH_URL)
 
     def fetch_tokens(self, auth_response_url):
         from requests_oauthlib import OAuth2Session
-        oauth = OAuth2Session(
-            self.client_id,
-            redirect_uri=self.redirect_uri,
-            scope=["com.intuit.quickbooks.accounting"]
-        )
-        tokens = oauth.fetch_token(
-            self.token_url,
+        oauth = OAuth2Session(self.client_id, redirect_uri=self.redirect_uri,
+                              scope=["com.intuit.quickbooks.accounting"])
+        tokens = oauth.fetch_token(self.TOKEN_URL,
             authorization_response=auth_response_url,
-            client_secret=self.client_secret
-        )
-
+            client_secret=self.client_secret)
         realm_id = parse_qs(urlparse(auth_response_url).query).get("realmId", [None])[0]
-
-        # Update permanent refresh token in file (and log for manual verification)
-        new_refresh_token = tokens["refresh_token"]
-        self._set_stored_value("qb_refresh_token", new_refresh_token)
-        # Record when this refresh token was issued so we can detect Intuit's
-        # 100-day absolute expiration limit during future audits.
-        self._set_stored_value("qb_refresh_token_issued_at", int(time.time()))
-        if realm_id:
-            self._set_stored_value("qb_realm_id", realm_id)
-
-        logger.info("NEW REFRESH TOKEN GENERATED!")
-        logger.info(f"QB_REFRESH_TOKEN={new_refresh_token}")
-        logger.info("↑↑↑ COPY THIS AND UPDATE IN RENDER ENVIRONMENT VARIABLES AS BACKUP ↑↑↑")
-
-        self._tokens.update({
-            "access_token": tokens["access_token"],
-            "refresh_token": new_refresh_token,
-            "expires_at": time.time() + tokens["expires_in"] - 60,
-            "realmId": realm_id,
-        })
-
-        logger.info(f"Current QuickBooks access token: {self._tokens['access_token']}")
-
-        if realm_id and not os.getenv("QB_REALM_ID"):
-            logger.info(f"QB_REALM_ID={realm_id}")
-
-        return self._tokens
+        if not realm_id:
+            raise QuickBooksAuthError("No realmId in callback URL")
+        now = time.time()
+        self._persist(realm_id=realm_id,
+                      refresh_token=tokens["refresh_token"],
+                      refresh_token_issued_at=now,
+                      access_token=tokens["access_token"],
+                      access_token_expires_at=now + int(tokens["expires_in"]) - 60)
+        self._tokens = None
+        logger.info("OAuth complete. Tokens stored in DB (realm_id=%s).", realm_id)
+        return {"realmId": realm_id,
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens["refresh_token"],
+                "expires_in": tokens["expires_in"]}

@@ -1,22 +1,20 @@
-from src.logger import setup_logger
+# src/invoice_service.py
 import pandas as pd
 from datetime import datetime
-import json
 import requests
+from src.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
 class InvoiceService:
-    """Handles invoice creation and appending in QuickBooks"""
-    
     def __init__(self, qb_client):
         self.qb_client = qb_client
-    
+
     def create_or_update_invoice(self, group, customer_id, lines):
         doc_number = str(group['Invoice No.'].iloc[0]).strip()
-        
-        service_date = group['Service Date'].iloc[0] if 'Service Date' in group else datetime.now().strftime('%Y-%m-%d')
-        if pd.isna(service_date):
+        service_date = group['Service Date'].iloc[0] if 'Service Date' in group else None
+        if pd.isna(service_date) or not service_date:
             service_date = datetime.now().strftime('%Y-%m-%d')
         elif not isinstance(service_date, str):
             service_date = pd.Timestamp(service_date).strftime('%Y-%m-%d')
@@ -24,75 +22,58 @@ class InvoiceService:
         patient_name = group['Patient Name'].iloc[0]
 
         try:
-            # 1. CHECK IF INVOICE ALREADY EXISTS (Inpatient check)
-            query = f"SELECT * FROM Invoice WHERE DocNumber = '{doc_number}' MAXRESULTS 1"
-            existing = self.qb_client.query(query)
-
-            if existing and existing.get("QueryResponse", {}).get("Invoice"):
-                # 2. APPEND TO EXISTING INVOICE
-                invoice = existing["QueryResponse"]["Invoice"][0]
-                
-                # Keep all existing lines (these already have QuickBooks IDs)
-                current_lines = invoice.get("Line", [])
-                
-                # Prepare new lines (Ensuring no 'Id' exists so QB assigns it automatically)
+            existing = self.qb_client.query(
+                f"SELECT * FROM Invoice WHERE DocNumber = '{doc_number}' MAXRESULTS 1")
+            inv = (existing.get("QueryResponse", {}).get("Invoice", [])
+                   or existing.get("Invoice", []))
+            if inv:
+                invoice = inv[0]
                 new_lines = []
                 for line in lines:
-                    new_line = line.copy()
-                    new_line.pop("Id", None)
-                    new_lines.append(new_line)
-
+                    l = line.copy()
+                    l.pop("Id", None)
+                    new_lines.append(l)
                 update_payload = {
                     "Id": invoice["Id"],
                     "SyncToken": invoice["SyncToken"],
                     "sparse": True,
-                    "Line": current_lines + new_lines,
-                    "CustomerMemo": {"value": f"Medical service for {patient_name}"}
+                    "Line": invoice.get("Line", []) + new_lines,
+                    "CustomerMemo": {"value": f"Medical service for {patient_name}"},
                 }
-
-                # Send update to QBO
                 response = self.qb_client._make_request("POST", "invoice", data=update_payload)
-                logger.info(f"Appended new items to existing invoice #{doc_number}")
-
+                logger.info("Appended to existing invoice #%s", doc_number)
             else:
-                # 3. CREATE BRAND NEW INVOICE
                 invoice_data = {
                     "CustomerRef": {"value": str(customer_id)},
                     "TxnDate": service_date,
                     "DocNumber": doc_number,
                     "Line": lines,
                     "CustomerMemo": {"value": f"Medical service for {patient_name}"},
-                    "TxnTaxDetail": {"TxnTaxCodeRef": {"value": "6"}, "TotalTax": 0}
+                    "TxnTaxDetail": {"TxnTaxCodeRef": {"value": "6"}, "TotalTax": 0},
                 }
                 response = self.qb_client.create_invoice(invoice_data)
-                logger.info(f"Created new invoice #{doc_number}")
-
+                logger.info("Created invoice #%s", doc_number)
         except requests.exceptions.HTTPError as e:
-            error_text = getattr(e.response, "text", "")
-            # Catch QuickBooks Duplicate Document Number Error (Code 6140)
-            if "6140" in error_text or "Duplicate Document Number Error" in error_text:
-                logger.warning(f"Invoice '{doc_number}' already exists in QuickBooks (Code 6140). Skipping safely.")
+            text = getattr(e.response, "text", "")
+            if "6140" in text or "Duplicate Document Number Error" in text:
+                logger.warning("Invoice %s already exists (6140)", doc_number)
                 return {"Id": "EXISTS", "DocNumber": doc_number}
             raise
 
-        # PHARMACY REAL STOCK DEDUCTION (ONLY FOR INSURANCE INVOICES)
         if hasattr(group, '_inventory_adjustments') and group._inventory_adjustments:
             for adj in group._inventory_adjustments:
                 payload = {
-                    "AdjustQty": {
-                        "Line": [{
-                            "DetailType": "ItemAdjustmentLineDetail",
-                            "ItemAdjustmentLineDetail": {
-                                "ItemRef": {"value": adj["item_id"]},
-                                "QtyDiff": -adj["real_qty"]
-                            }
-                        }]
-                    }
+                    "AdjustQty": {"Line": [{
+                        "DetailType": "ItemAdjustmentLineDetail",
+                        "ItemAdjustmentLineDetail": {
+                            "ItemRef": {"value": adj["item_id"]},
+                            "QtyDiff": -adj["real_qty"],
+                        },
+                    }]},
                 }
                 try:
                     self.qb_client._make_request('POST', 'inventoryadjustment', data=payload)
-                    logger.info(f"Stock deducted: {adj['description']} × {adj['real_qty']}")
                 except Exception as e:
-                    logger.warning(f"Stock adjust failed: {e}")
+                    logger.warning("Stock adjust failed: %s", e)
 
         return response

@@ -59,7 +59,6 @@ vercel dev
 
 ## Configuration
 
-- `config/mappings.json` — product/category mappings used by the mapper.
 - `.env` — QuickBooks API tokens and credentials. Keep this file secure and do not commit secrets to source control.
 - `config/settings.py` — basic app settings.
 
@@ -114,5 +113,5 @@ The tests in `tests/` include unit tests for the CSV parser, mapper, and QuickBo
 
 #
 
-
+# Ndegwer Made It.
 
