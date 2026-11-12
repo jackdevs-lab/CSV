@@ -123,3 +123,37 @@ def is_already_processed(invoice_number, transaction_type) -> bool:
             WHERE invoice_number = %s AND transaction_type = %s AND status = 'success'
         """, (invoice_number, transaction_type))
         return cur.fetchone() is not None
+    # db.py — append these to the end of the file
+
+def get_upload(upload_id):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT id, filename, started_at, finished_at, status,
+                   total_invoices, succeeded, failed, log
+            FROM uploads WHERE id = %s
+        """, (upload_id,))
+        return cur.fetchone()
+
+
+def get_upload_errors(upload_id, limit=100):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT invoice_number, transaction_type, status,
+                   error_message, created_at
+            FROM upload_invoices
+            WHERE upload_id = %s AND status = 'error'
+            ORDER BY created_at ASC
+            LIMIT %s
+        """, (upload_id, limit))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def list_recent_uploads(limit=10):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT id, filename, started_at, finished_at, status,
+                   total_invoices, succeeded, failed
+            FROM uploads
+            ORDER BY id DESC LIMIT %s
+        """, (limit,))
+        return [dict(r) for r in cur.fetchall()]

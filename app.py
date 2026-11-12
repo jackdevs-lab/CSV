@@ -276,7 +276,58 @@ def upload_file():
         'upload_id': upload_id,
         'logs': logs,
     })
+# app.py — add these two routes
 
+@app.route('/upload/<int:upload_id>/status')
+def upload_status(upload_id):
+    """
+    Polled by the frontend during and after an upload.
+    Returns the current upload row + any per-invoice errors.
+    """
+    try:
+        upload = db.get_upload(upload_id)
+    except Exception as e:
+        logger.error("upload_status DB error: %s", e, exc_info=True)
+        return jsonify({'error': 'db_error'}), 500
+
+    if not upload:
+        return jsonify({'error': 'not_found'}), 404
+
+    errors = db.get_upload_errors(upload_id, limit=100) \
+        if upload['status'] == 'running' or upload['failed'] > 0 else []
+
+    def _iso(dt):
+        return dt.isoformat() if dt else None
+
+    return jsonify({
+        'id': upload['id'],
+        'filename': upload['filename'],
+        'status': upload['status'],
+        'started_at': _iso(upload['started_at']),
+        'finished_at': _iso(upload['finished_at']),
+        'total_invoices': upload['total_invoices'],
+        'succeeded': upload['succeeded'],
+        'failed': upload['failed'],
+        'errors': [
+            {
+                'invoice_number': e['invoice_number'],
+                'type': e['transaction_type'],
+                'error': (e['error_message'] or '')[:500],
+                'created_at': _iso(e['created_at']),
+            }
+            for e in errors
+        ],
+    })
+
+
+@app.route('/uploads/recent')
+def uploads_recent():
+    """Optional: lists the last 10 uploads. Useful for a 'history' view."""
+    try:
+        return jsonify(db.list_recent_uploads(limit=10))
+    except Exception as e:
+        logger.error("uploads_recent DB error: %s", e, exc_info=True)
+        return jsonify({'error': 'db_error'}), 500
 
 @app.route('/status')
 def status():

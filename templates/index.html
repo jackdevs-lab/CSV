@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - QBO Health Monitor</title>
-    <!-- Using Tailwind CSS via CDN for rapid, professional styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -12,11 +11,12 @@
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         .dragover { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden text-slate-800">
 
-    <!-- Sidebar -->
+    <!-- Sidebar (unchanged) -->
     <aside class="w-64 bg-white border-r border-slate-200 flex flex-col">
         <div class="h-16 flex items-center px-6 border-b border-slate-200">
             <i class="fa-solid fa-heart-pulse text-blue-600 text-xl mr-3"></i>
@@ -37,83 +37,133 @@
 
     <!-- Main Content -->
     <main class="flex-1 flex flex-col h-screen overflow-y-auto">
-        <!-- Top Header -->
         <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
             <h1 class="text-xl font-semibold text-slate-800">Data Synchronization</h1>
-            <div id="connection-status" class="flex items-center px-3 py-1.5 rounded-full bg-green-100 text-green-700 text-sm font-medium">
-                <span class="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span> Connected to QuickBooks
+            <div id="connection-status"
+                 class="flex items-center px-3 py-1.5 rounded-full bg-green-100 text-green-700 text-sm font-medium">
+                <span class="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></span>
+                Connected to QuickBooks
             </div>
         </header>
 
-        <!-- Dashboard Content -->
-        <div class="p-8 max-w-5xl mx-auto w-full space-y-6">
-            
+        <div class="p-8 max-w-6xl mx-auto w-full space-y-6">
+
             <!-- Upload Section -->
             <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
                 <h2 class="text-lg font-semibold mb-1">Upload CSV File</h2>
                 <p class="text-slate-500 text-sm mb-6">Process your financial data for health monitoring and sync.</p>
-                
+
                 <form id="upload-form">
-                    <div id="upload-area" class="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center transition-all hover:bg-slate-50 cursor-pointer">
+                    <div id="upload-area"
+                         class="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center transition-all hover:bg-slate-50 cursor-pointer">
                         <i class="fa-solid fa-cloud-arrow-up text-4xl text-blue-500 mb-4"></i>
                         <h3 class="text-slate-700 font-medium mb-1">Drag and drop your CSV here</h3>
                         <p class="text-slate-500 text-sm mb-4">or click to browse from your computer</p>
                         <input type="file" id="csv-file" name="file" accept=".csv" class="hidden">
-                        <label for="csv-file" class="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 cursor-pointer shadow-sm transition-all">
+                        <label for="csv-file"
+                               class="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 cursor-pointer shadow-sm transition-all">
                             Browse Files
                         </label>
                     </div>
 
-                    <!-- Selected File Info (Hidden by default) -->
-                    <div id="file-info" class="hidden mt-4 p-4 bg-blue-50 border border-blue-100 rounded-lg flex items-center justify-between">
+                    <div id="file-info"
+                         class="hidden mt-4 p-4 bg-blue-50 border border-blue-100 rounded-lg flex items-center justify-between">
                         <div class="flex items-center text-blue-700">
                             <i class="fa-solid fa-file-excel mr-3 text-lg"></i>
                             <span id="file-name-display" class="font-medium text-sm">filename.csv</span>
                         </div>
-                        <button type="button" id="remove-file" class="text-slate-400 hover:text-red-500 transition-colors">
+                        <button type="button" id="remove-file"
+                                class="text-slate-400 hover:text-red-500 transition-colors">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
 
-                    <button type="submit" id="process-btn" disabled class="mt-6 w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                    <button type="submit" id="process-btn" disabled
+                            class="mt-6 w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
                         Process and Sync Data
                     </button>
                 </form>
+
+                <!-- Upload status card (hidden until a run starts) -->
+                <div id="progress-card"
+                     class="hidden mt-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <span id="progress-badge"
+                                  class="px-2.5 py-1 rounded-md text-xs font-semibold bg-yellow-100 text-yellow-700">
+                                RUNNING
+                            </span>
+                            <span id="progress-upload-id" class="text-xs text-slate-500 font-mono"></span>
+                        </div>
+                        <span id="progress-filename" class="text-sm font-medium text-slate-700"></span>
+                    </div>
+                    <div class="w-full bg-slate-200 rounded-full h-2 mb-3">
+                        <div id="progress-bar"
+                             class="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                             style="width: 0%"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-3 text-center text-sm">
+                        <div>
+                            <div id="stat-total" class="text-lg font-semibold text-slate-700">0</div>
+                            <div class="text-xs text-slate-500">Processed</div>
+                        </div>
+                        <div>
+                            <div id="stat-success" class="text-lg font-semibold text-green-600">0</div>
+                            <div class="text-xs text-slate-500">Succeeded</div>
+                        </div>
+                        <div>
+                            <div id="stat-failed" class="text-lg font-semibold text-red-600">0</div>
+                            <div class="text-xs text-slate-500">Failed</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Two Column Layout for Logs and Dropped Records -->
+            <!-- Results section -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden" id="results-section">
-                
+
                 <!-- System Logs -->
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col">
                     <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
-                        <h3 class="font-semibold text-slate-700 text-sm"><i class="fa-solid fa-terminal mr-2"></i> System Logs</h3>
-                        <span id="status-badge" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-yellow-100 text-yellow-700 hidden">PROCESSING</span>
+                        <h3 class="font-semibold text-slate-700 text-sm">
+                            <i class="fa-solid fa-terminal mr-2"></i> System Logs
+                        </h3>
+                        <button id="refresh-logs-btn"
+                                class="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1">
+                            <i class="fa-solid fa-rotate"></i> Refresh
+                        </button>
                     </div>
-                    <div id="log-output" class="p-4 bg-slate-900 text-green-400 font-mono text-xs h-64 overflow-y-auto scrollbar-hide rounded-b-xl">
-                        Waiting for upload...
+                    <div id="log-output"
+                         class="p-4 bg-slate-900 text-green-400 font-mono text-xs h-72 overflow-y-auto scrollbar-hide rounded-b-xl whitespace-pre-wrap">
+Waiting for upload...
                     </div>
                 </div>
 
-                <!-- Dropped Records Table -->
+                <!-- Dropped Records -->
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col">
                     <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-red-50 rounded-t-xl border-red-100">
-                        <h3 class="font-semibold text-red-700 text-sm"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Dropped Records</h3>
-                        <span id="dropped-count" class="px-2.5 py-1 rounded-md text-xs font-bold bg-red-100 text-red-700">0 Failed</span>
+                        <h3 class="font-semibold text-red-700 text-sm">
+                            <i class="fa-solid fa-triangle-exclamation mr-2"></i> Dropped Records
+                        </h3>
+                        <span id="dropped-count"
+                              class="px-2.5 py-1 rounded-md text-xs font-bold bg-red-100 text-red-700">
+                            0 Failed
+                        </span>
                     </div>
-                    <div class="p-0 overflow-y-auto h-64 scrollbar-hide">
+                    <div class="p-0 overflow-y-auto h-72 scrollbar-hide">
                         <table class="w-full text-left border-collapse" id="dropped-table">
                             <thead>
                                 <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
-                                    <th class="px-4 py-3 font-medium">Row</th>
-                                    <th class="px-4 py-3 font-medium">Entity Name</th>
-                                    <th class="px-4 py-3 font-medium">Error Reason</th>
+                                    <th class="px-4 py-3 font-medium">Invoice</th>
+                                    <th class="px-4 py-3 font-medium">Type</th>
+                                    <th class="px-4 py-3 font-medium">Reason</th>
                                 </tr>
                             </thead>
                             <tbody id="dropped-records-body" class="text-sm divide-y divide-slate-100">
-                                <!-- JS will populate this -->
                                 <tr>
-                                    <td colspan="3" class="px-4 py-8 text-center text-slate-400 text-sm">No dropped records to display</td>
+                                    <td colspan="3" class="px-4 py-8 text-center text-slate-400 text-sm">
+                                        No dropped records to display
+                                    </td>
                                 </tr>
                             </tbody>
                         </table>
@@ -124,33 +174,55 @@
         </div>
     </main>
 
-   <script>
-        const uploadArea = document.getElementById('upload-area');
-        const fileInput = document.getElementById('csv-file');
-        const fileInfo = document.getElementById('file-info');
+    <script>
+        // ============================================================
+        // DOM
+        // ============================================================
+        const uploadArea      = document.getElementById('upload-area');
+        const fileInput       = document.getElementById('csv-file');
+        const fileInfo        = document.getElementById('file-info');
         const fileNameDisplay = document.getElementById('file-name-display');
-        const removeFileBtn = document.getElementById('remove-file');
-        const processBtn = document.getElementById('process-btn');
-        const resultsSection = document.getElementById('results-section');
-        const logOutput = document.getElementById('log-output');
+        const removeFileBtn   = document.getElementById('remove-file');
+        const processBtn      = document.getElementById('process-btn');
+        const resultsSection  = document.getElementById('results-section');
+        const logOutput       = document.getElementById('log-output');
         const droppedRecordsBody = document.getElementById('dropped-records-body');
-        const droppedCount = document.getElementById('dropped-count');
+        const droppedCount    = document.getElementById('dropped-count');
 
-        // Drag and drop events
-        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
-        uploadArea.addEventListener('dragleave', () => { uploadArea.classList.remove('dragover'); });
+        const progressCard    = document.getElementById('progress-card');
+        const progressBadge   = document.getElementById('progress-badge');
+        const progressBar     = document.getElementById('progress-bar');
+        const progressUploadId = document.getElementById('progress-upload-id');
+        const progressFilename = document.getElementById('progress-filename');
+        const statTotal       = document.getElementById('stat-total');
+        const statSuccess     = document.getElementById('stat-success');
+        const statFailed      = document.getElementById('stat-failed');
+        const refreshLogsBtn  = document.getElementById('refresh-logs-btn');
+
+        // ============================================================
+        // Drag & drop / file selection
+        // ============================================================
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadArea.classList.remove('dragover');
             if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
         });
-
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) handleFile(e.target.files[0]);
         });
 
         function handleFile(file) {
-            if (!file.name.endsWith('.csv')) return alert('Please upload a CSV file.');
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                alert('Please upload a CSV file.');
+                return;
+            }
             fileNameDisplay.textContent = file.name;
             fileInfo.classList.remove('hidden');
             processBtn.disabled = false;
@@ -160,40 +232,182 @@
             fileInput.value = '';
             fileInfo.classList.add('hidden');
             processBtn.disabled = true;
-            resultsSection.classList.add('hidden');
         });
 
+        // ============================================================
+        // Log rendering
+        // ============================================================
+        function escapeHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+        function renderLog(text) {
+            logOutput.innerHTML = escapeHtml(text || '(no output)');
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+        function appendLog(text) {
+            logOutput.innerHTML += escapeHtml(text);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        // ============================================================
+        // Status polling
+        // ============================================================
+        let pollTimer = null;
+        let currentUploadId = null;
+        let pollStartTime = null;
+
+        async function pollStatus() {
+            if (!currentUploadId) return;
+            try {
+                const r = await fetch(`/upload/${currentUploadId}/status`);
+                if (!r.ok) throw new Error(`status HTTP ${r.status}`);
+                const data = await r.json();
+                updateProgress(data);
+
+                // Stop polling once the upload is finished
+                if (data.status !== 'running') {
+                    stopPolling();
+                }
+            } catch (err) {
+                console.warn('status poll error', err);
+                // Keep polling — the request may recover
+            }
+        }
+
+        function startPolling() {
+            stopPolling();
+            pollStartTime = Date.now();
+            pollTimer = setInterval(pollStatus, 3000);
+            pollStatus(); // immediate first hit
+        }
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        function updateProgress(data) {
+            // Progress card
+            progressCard.classList.remove('hidden');
+            progressUploadId.textContent = `Upload #${data.id}`;
+            progressFilename.textContent = data.filename || '';
+
+            const total = data.total_invoices || 0;
+            const succeeded = data.succeeded || 0;
+            const failed = data.failed || 0;
+            const processed = succeeded + failed;
+
+            statTotal.textContent = processed;
+            statSuccess.textContent = succeeded;
+            statFailed.textContent = failed;
+
+            const pct = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : 0;
+            progressBar.style.width = pct + '%';
+
+            // Badge
+            const status = data.status || 'running';
+            progressBadge.className = 'px-2.5 py-1 rounded-md text-xs font-semibold ';
+            if (status === 'running') {
+                progressBadge.classList.add('bg-yellow-100', 'text-yellow-700');
+                progressBadge.textContent = 'RUNNING';
+            } else if (status === 'success') {
+                progressBadge.classList.add('bg-green-100', 'text-green-700');
+                progressBadge.textContent = 'COMPLETE';
+            } else if (status === 'partial') {
+                progressBadge.classList.add('bg-orange-100', 'text-orange-700');
+                progressBadge.textContent = 'PARTIAL';
+            } else {
+                progressBadge.classList.add('bg-red-100', 'text-red-700');
+                progressBadge.textContent = status.toUpperCase();
+            }
+
+            // Dropped records
+            const errors = data.errors || [];
+            droppedCount.textContent = `${errors.length} Failed`;
+            if (errors.length === 0) {
+                droppedRecordsBody.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="px-4 py-8 text-center text-slate-400 text-sm">
+                            No dropped records to display
+                        </td>
+                    </tr>`;
+            } else {
+                droppedRecordsBody.innerHTML = errors.map(e => `
+                    <tr class="hover:bg-red-50/40">
+                        <td class="px-4 py-3 font-mono text-xs text-slate-700">
+                            ${escapeHtml(e.invoice_number)}
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-500">
+                            ${escapeHtml(e.type || '')}
+                        </td>
+                        <td class="px-4 py-3 text-xs text-red-700">
+                            ${escapeHtml((e.error || '').slice(0, 300))}
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // ============================================================
+        // Upload submit
+        // ============================================================
         document.getElementById('upload-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const file = fileInput.files[0];
             if (!file) return;
 
+            // Reset UI
             resultsSection.classList.remove('hidden');
-            logOutput.innerHTML = '<span class="text-yellow-400">Initiating sync sequence... uploading to backend...</span><br/>';
+            progressCard.classList.add('hidden');
+            logOutput.textContent = '';
+            appendLog('Initiating sync sequence...\n');
             processBtn.disabled = true;
-            processBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Processing...';
+            processBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Uploading...';
 
             const formData = new FormData();
             formData.append('file', file);
 
+            let uploadId = null;
             try {
                 const response = await fetch('/upload', {
                     method: 'POST',
                     body: formData
                 });
-                
+
+                if (response.status === 401) {
+                    appendLog('\nQuickBooks connection lost. Redirecting to /login...\n');
+                    window.location.href = '/login';
+                    return;
+                }
+
                 const data = await response.json();
-                
-                if (data.success) {
-                    logOutput.innerHTML += `<span class="text-green-400">${data.logs.replace(/\n/g, '<br/>')}</span>`;
-                } else {
-                    logOutput.innerHTML += `<span class="text-red-400">${data.logs ? data.logs.replace(/\n/g, '<br/>') : data.error}</span>`;
+                uploadId = data.upload_id;
+                currentUploadId = uploadId;
+
+                if (data.logs) {
+                    appendLog('\n' + data.logs + '\n');
+                } else if (data.error) {
+                    appendLog('\nError: ' + data.error + '\n');
+                }
+
+                // Begin polling regardless of success/fail — the DB row
+                // has the authoritative state.
+                if (uploadId) {
+                    startPolling();
                 }
             } catch (err) {
-                logOutput.innerHTML += `<span class="text-red-400">Network or server error: ${err.message}</span>`;
+                appendLog('\nNetwork or server error: ' + err.message + '\n');
             } finally {
                 processBtn.innerHTML = 'Process and Sync Data';
                 processBtn.disabled = false;
+            }
+        });
+
+        // Manual refresh of the last upload's status
+        refreshLogsBtn.addEventListener('click', () => {
+            if (currentUploadId) {
+                pollStatus();
             }
         });
     </script>
