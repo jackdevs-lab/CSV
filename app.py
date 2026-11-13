@@ -7,6 +7,10 @@ import tempfile
 from io import StringIO
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+import json
+import queue
+from flask import Response
+import threading
 
 import pandas as pd
 from flask import Flask, request, render_template, jsonify, redirect, session
@@ -35,10 +39,19 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 
 logger = setup_logger(__name__)
-log_stream = StringIO()
-handler = logging.StreamHandler(log_stream)
-handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logger.addHandler(handler)
+
+# --- STREAMING LOG SETUP ---
+class StreamingLogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.queue = queue.Queue()
+    def emit(self, record):
+        self.queue.put(self.format(record))
+
+stream_handler = StreamingLogHandler()
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logging.getLogger().addHandler(stream_handler)
+logging.getLogger().setLevel(logging.INFO)
 
 
 def require_connection():
@@ -165,16 +178,44 @@ def process_csv_file(file_path):
                 if is_insurance:
                     insurance_name = mapper.extract_insurance_name(group)
                     if insurance_name and insurance_name.strip():
-                        customer_id = customer_service.find_or_create_customer(
-                            group, mapper, customer_type="insurance", insurance_name=insurance_name.strip())
+                        try:
+                            customer_id = customer_service.find_or_create_customer(
+                                group, mapper, customer_type="insurance", insurance_name=insurance_name.strip())
+                        except RuntimeError as e:
+                            if "Duplicate" in str(e) or "6240" in str(e):
+                                from src.customer_service import INSURANCE_FULL_NAMES
+                                cleaned = str(insurance_name).strip().upper()
+                                full_name = INSURANCE_FULL_NAMES.get(cleaned, str(insurance_name).strip())
+                                customer_id = customer_service.get_customer_id_by_name(full_name)
+                                if not customer_id: raise
+                            else:
+                                raise
                         transaction_type = "invoice"
                     else:
-                        customer_id = customer_service.find_or_create_customer(
-                            group, mapper, customer_type="patient")
+                        try:
+                            customer_id = customer_service.find_or_create_customer(
+                                group, mapper, customer_type="patient")
+                        except RuntimeError as e:
+                            if "Duplicate" in str(e) or "6240" in str(e):
+                                p_name = (' '.join(str(group['Patient Name'].iloc[0]).strip().split()).title())
+                                p_id = str(group['Patient ID'].iloc[0]).strip()
+                                customer_id = customer_service.get_customer_id_by_name(f"{p_name} ID {p_id}")
+                                if not customer_id: raise
+                            else:
+                                raise
                         transaction_type = "sales_receipt"
                 else:
-                    customer_id = customer_service.find_or_create_customer(
-                        group, mapper, customer_type="patient")
+                    try:
+                        customer_id = customer_service.find_or_create_customer(
+                            group, mapper, customer_type="patient")
+                    except RuntimeError as e:
+                        if "Duplicate" in str(e) or "6240" in str(e):
+                            p_name = (' '.join(str(group['Patient Name'].iloc[0]).strip().split()).title())
+                            p_id = str(group['Patient ID'].iloc[0]).strip()
+                            customer_id = customer_service.get_customer_id_by_name(f"{p_name} ID {p_id}")
+                            if not customer_id: raise
+                        else:
+                            raise
                     transaction_type = "sales_receipt"
 
                 # ---------------------------------------------------------
@@ -238,29 +279,60 @@ def process_csv_file(file_path):
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    # We keep this endpoint so the old JS doesn't break if someone has it cached, 
+    # but the new JS will use /upload_stream
+    return upload_stream()
+
+@app.route('/upload_stream', methods=['POST'])
+def upload_stream():
     if not require_connection():
-        return jsonify({'success': False, 'error': 'QuickBooks connection lost. Please reconnect at /login.'}), 401
-
+        return "Unauthorized", 401
     if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file'})
-
+        return "No file", 400
     file = request.files['file']
     if not file or not file.filename.lower().endswith('.csv'):
-        return jsonify({'success': False, 'error': 'CSV only'})
+        return "CSV only", 400
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
-        file.save(tmp.name)
-        try:
-            success, logs = process_csv_file(tmp.name)
-        finally:
-            try: os.unlink(tmp.name)
-            except FileNotFoundError: pass
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.csv')
+    file.save(temp_file.name)
+    temp_file.close()
 
-    return jsonify({
-        'success': success,
-        'message': 'Done!' if success else 'Completed with errors',
-        'logs': logs
-    })
+    def generate():
+        # Clear any old logs from previous runs
+        with stream_handler.queue.mutex:
+            stream_handler.queue.queue.clear()
+
+        result_holder = {}
+        
+        def run():
+            try:
+                ok, summary = process_csv_file(temp_file.name)
+                result_holder['ok'] = ok
+                result_holder['summary'] = summary
+            except Exception as e:
+                logger.error(f"Thread error: {e}", exc_info=True)
+                result_holder['ok'] = False
+                result_holder['summary'] = str(e)
+            finally:
+                try: os.unlink(temp_file.name)
+                except: pass
+                stream_handler.queue.put("__DONE__")
+
+        thread = threading.Thread(target=run)
+        thread.start()
+
+        while True:
+            try:
+                msg = stream_handler.queue.get(timeout=10)
+                if msg == "__DONE__":
+                    yield f"data: {json.dumps({'type': 'complete', 'success': result_holder.get('ok', False), 'summary': result_holder.get('summary', '')})}\n\n"
+                    break
+                yield f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+            except queue.Empty:
+                # Keep-alive to prevent Railway proxy from killing the connection
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/status')
 def status():

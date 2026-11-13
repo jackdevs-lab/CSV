@@ -67,19 +67,26 @@ class CustomerService:
                                  or self._fallback_search_by_components(full_name))
                     if recovered:
                         return recovered
-                    continue
+                    # If we STILL can't find it, raise so app.py can try its own fallback
+                    raise RuntimeError(f"Customer exists but lookup failed: {full_name}")
                 logger.error("Create customer attempt %d failed: %s",
                              attempt + 1, msg, exc_info=True)
                 time.sleep(0.5)
 
-        final = (self.get_customer_id_by_name(full_name)
-                 or self._fallback_search_by_components(full_name))
-        if final:
-            return final
         raise RuntimeError(f"Failed to create/find customer after retries: {full_name}")
 
     def get_customer_id_by_name(self, full_display_name: str):
-        escaped = full_display_name.replace("'", "''")
+        """
+        Search for a customer safely. Handles apostrophes by searching on the
+        name portion only (stripping ' ID 12345') to avoid QB query syntax errors.
+        """
+        # 1. Strip the ID suffix so we can search by name reliably
+        search_name = full_display_name.split(" ID ")[0] if " ID " in full_display_name else full_display_name
+        
+        # 2. Escape apostrophes using a backslash (QB prefers \' over '')
+        escaped = search_name.replace("'", "\\'")
+
+        # Try exact match first
         try:
             data = self.qb_client._query_safe(
                 f"SELECT Id, DisplayName FROM Customer "
@@ -91,20 +98,18 @@ class CustomerService:
         except Exception as e:
             logger.debug("Exact match failed: %s", e)
 
-        for variant in (full_display_name,
-                        full_display_name.replace(" ID ", " Id "),
-                        full_display_name.replace(" ID ", " id ")):
-            esc = variant.replace("'", "''")
-            try:
-                data = self.qb_client._query_safe(
-                    f"SELECT Id, DisplayName FROM Customer "
-                    f"WHERE DisplayName LIKE '%{esc}%' MAXRESULTS 5")
-                customers = data.get('Customer', []) or \
-                            data.get('QueryResponse', {}).get('Customer', [])
-                if customers:
-                    return str(customers[0]['Id'])
-            except Exception as e:
-                logger.debug("LIKE lookup failed: %s", e)
+        # Fallback: LIKE query using just the name
+        try:
+            data = self.qb_client._query_safe(
+                f"SELECT Id, DisplayName FROM Customer "
+                f"WHERE DisplayName LIKE '%{escaped}%' MAXRESULTS 5")
+            customers = data.get('Customer', []) or \
+                        data.get('QueryResponse', {}).get('Customer', [])
+            if customers:
+                return str(customers[0]['Id'])
+        except Exception as e:
+            logger.debug("LIKE lookup failed: %s", e)
+
         return None
 
     def _fallback_search_by_components(self, full_display_name: str):
@@ -113,7 +118,7 @@ class CustomerService:
             numeric = [t for t in tokens if t.isdigit()]
             terms = (numeric + tokens)[:4]
             for term in terms:
-                esc = term.replace("'", "''")
+                esc = term.replace("'", "\\'")
                 data = self.qb_client._query_safe(
                     f"SELECT Id, DisplayName FROM Customer "
                     f"WHERE DisplayName LIKE '%{esc}%' MAXRESULTS 5")

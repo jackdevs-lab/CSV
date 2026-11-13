@@ -174,7 +174,7 @@ Waiting for upload...
         </div>
     </main>
 
-    <script>
+        <script>
         // ============================================================
         // DOM
         // ============================================================
@@ -189,29 +189,13 @@ Waiting for upload...
         const droppedRecordsBody = document.getElementById('dropped-records-body');
         const droppedCount    = document.getElementById('dropped-count');
 
-        const progressCard    = document.getElementById('progress-card');
-        const progressBadge   = document.getElementById('progress-badge');
-        const progressBar     = document.getElementById('progress-bar');
-        const progressUploadId = document.getElementById('progress-upload-id');
-        const progressFilename = document.getElementById('progress-filename');
-        const statTotal       = document.getElementById('stat-total');
-        const statSuccess     = document.getElementById('stat-success');
-        const statFailed      = document.getElementById('stat-failed');
-        const refreshLogsBtn  = document.getElementById('refresh-logs-btn');
-
         // ============================================================
         // Drag & drop / file selection
         // ============================================================
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => { uploadArea.classList.remove('dragover'); });
         uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
+            e.preventDefault(); uploadArea.classList.remove('dragover');
             if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
         });
         fileInput.addEventListener('change', (e) => {
@@ -219,10 +203,7 @@ Waiting for upload...
         });
 
         function handleFile(file) {
-            if (!file.name.toLowerCase().endsWith('.csv')) {
-                alert('Please upload a CSV file.');
-                return;
-            }
+            if (!file.name.toLowerCase().endsWith('.csv')) return alert('Please upload a CSV file.');
             fileNameDisplay.textContent = file.name;
             fileInfo.classList.remove('hidden');
             processBtn.disabled = false;
@@ -238,14 +219,7 @@ Waiting for upload...
         // Log rendering
         // ============================================================
         function escapeHtml(s) {
-            return String(s || '')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-        }
-        function renderLog(text) {
-            logOutput.innerHTML = escapeHtml(text || '(no output)');
-            logOutput.scrollTop = logOutput.scrollHeight;
+            return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
         function appendLog(text) {
             logOutput.innerHTML += escapeHtml(text);
@@ -253,124 +227,25 @@ Waiting for upload...
         }
 
         // ============================================================
-        // Status polling
-        // ============================================================
-        let pollTimer = null;
-        let currentUploadId = null;
-        let pollStartTime = null;
-
-        async function pollStatus() {
-            if (!currentUploadId) return;
-            try {
-                const r = await fetch(`/upload/${currentUploadId}/status`);
-                if (!r.ok) throw new Error(`status HTTP ${r.status}`);
-                const data = await r.json();
-                updateProgress(data);
-
-                // Stop polling once the upload is finished
-                if (data.status !== 'running') {
-                    stopPolling();
-                }
-            } catch (err) {
-                console.warn('status poll error', err);
-                // Keep polling — the request may recover
-            }
-        }
-
-        function startPolling() {
-            stopPolling();
-            pollStartTime = Date.now();
-            pollTimer = setInterval(pollStatus, 3000);
-            pollStatus(); // immediate first hit
-        }
-        function stopPolling() {
-            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-        }
-
-        function updateProgress(data) {
-            // Progress card
-            progressCard.classList.remove('hidden');
-            progressUploadId.textContent = `Upload #${data.id}`;
-            progressFilename.textContent = data.filename || '';
-
-            const total = data.total_invoices || 0;
-            const succeeded = data.succeeded || 0;
-            const failed = data.failed || 0;
-            const processed = succeeded + failed;
-
-            statTotal.textContent = processed;
-            statSuccess.textContent = succeeded;
-            statFailed.textContent = failed;
-
-            const pct = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : 0;
-            progressBar.style.width = pct + '%';
-
-            // Badge
-            const status = data.status || 'running';
-            progressBadge.className = 'px-2.5 py-1 rounded-md text-xs font-semibold ';
-            if (status === 'running') {
-                progressBadge.classList.add('bg-yellow-100', 'text-yellow-700');
-                progressBadge.textContent = 'RUNNING';
-            } else if (status === 'success') {
-                progressBadge.classList.add('bg-green-100', 'text-green-700');
-                progressBadge.textContent = 'COMPLETE';
-            } else if (status === 'partial') {
-                progressBadge.classList.add('bg-orange-100', 'text-orange-700');
-                progressBadge.textContent = 'PARTIAL';
-            } else {
-                progressBadge.classList.add('bg-red-100', 'text-red-700');
-                progressBadge.textContent = status.toUpperCase();
-            }
-
-            // Dropped records
-            const errors = data.errors || [];
-            droppedCount.textContent = `${errors.length} Failed`;
-            if (errors.length === 0) {
-                droppedRecordsBody.innerHTML = `
-                    <tr>
-                        <td colspan="3" class="px-4 py-8 text-center text-slate-400 text-sm">
-                            No dropped records to display
-                        </td>
-                    </tr>`;
-            } else {
-                droppedRecordsBody.innerHTML = errors.map(e => `
-                    <tr class="hover:bg-red-50/40">
-                        <td class="px-4 py-3 font-mono text-xs text-slate-700">
-                            ${escapeHtml(e.invoice_number)}
-                        </td>
-                        <td class="px-4 py-3 text-xs text-slate-500">
-                            ${escapeHtml(e.type || '')}
-                        </td>
-                        <td class="px-4 py-3 text-xs text-red-700">
-                            ${escapeHtml((e.error || '').slice(0, 300))}
-                        </td>
-                    </tr>
-                `).join('');
-            }
-        }
-
-        // ============================================================
-        // Upload submit
+        // Upload submit (Streaming)
         // ============================================================
         document.getElementById('upload-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const file = fileInput.files[0];
             if (!file) return;
 
-            // Reset UI
             resultsSection.classList.remove('hidden');
-            progressCard.classList.add('hidden');
             logOutput.textContent = '';
             appendLog('Initiating sync sequence...\n');
             processBtn.disabled = true;
-            processBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Uploading...';
+            processBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Processing...';
 
             const formData = new FormData();
             formData.append('file', file);
 
-            let uploadId = null;
             try {
-                const response = await fetch('/upload', {
+                // Change to /upload_stream to get live logs
+                const response = await fetch('/upload_stream', {
                     method: 'POST',
                     body: formData
                 });
@@ -381,33 +256,40 @@ Waiting for upload...
                     return;
                 }
 
-                const data = await response.json();
-                uploadId = data.upload_id;
-                currentUploadId = uploadId;
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
 
-                if (data.logs) {
-                    appendLog('\n' + data.logs + '\n');
-                } else if (data.error) {
-                    appendLog('\nError: ' + data.error + '\n');
-                }
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop(); // keep the last partial line
 
-                // Begin polling regardless of success/fail — the DB row
-                // has the authoritative state.
-                if (uploadId) {
-                    startPolling();
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.substring(6);
+                            try {
+                                const data = JSON.parse(dataStr);
+                                if (data.type === 'log') {
+                                    appendLog(data.message + '\n');
+                                } else if (data.type === 'complete') {
+                                    appendLog('\n=== FINISHED ===\n');
+                                    appendLog(data.summary);
+                                }
+                            } catch (err) {
+                                console.error("Parse error:", err);
+                            }
+                        }
+                    }
                 }
             } catch (err) {
-                appendLog('\nNetwork or server error: ' + err.message + '\n');
+                appendLog('\nNetwork error: ' + err.message + '\n');
             } finally {
                 processBtn.innerHTML = 'Process and Sync Data';
                 processBtn.disabled = false;
-            }
-        });
-
-        // Manual refresh of the last upload's status
-        refreshLogsBtn.addEventListener('click', () => {
-            if (currentUploadId) {
-                pollStatus();
             }
         });
     </script>
