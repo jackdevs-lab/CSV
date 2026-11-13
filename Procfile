@@ -1,1 +1,1 @@
-web: gunicorn app:app --workers=1 --threads=8 --timeout 900 --log-file=-
+web: gunicorn app:app --workers=1 --threads=8 --timeout=3600

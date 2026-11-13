@@ -1,17 +1,15 @@
-# app.py
-"""
-Flask entrypoint. Sync processing, DB-backed auth & audit.
-"""
-from flask import Flask, request, render_template, jsonify, redirect, session
-from pathlib import Path
+# app.py — SYNCHRONOUS PROCESSOR + DB-TOKEN AUTH
 import os
 import sys
+import time
 import logging
 import tempfile
 from io import StringIO
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 
 import pandas as pd
+from flask import Flask, request, render_template, jsonify, redirect, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
@@ -20,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent
 sys.path.append(str(BASE_DIR / "src"))
 
 import db
-db.init_db()  # idempotent; safe every boot
+db.init_db()
 
 from src.csv_parser import CSVParser
 from src.mapper import TransactionMapper
@@ -30,24 +28,19 @@ from src.invoice_service import InvoiceService
 from src.receipt_service import ReceiptService
 from src.qb_auth import QuickBooksAuth, QuickBooksAuthError
 from src.qb_client import QuickBooksClient
-from src.logger import setup_logger, log_processing_result
+from src.logger import setup_logger
 
-app = Flask(
-    __name__,
-    template_folder=str(BASE_DIR / "templates"),
-    static_folder=str(BASE_DIR / "static"),
-)
+app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 
 logger = setup_logger(__name__)
 log_stream = StringIO()
-_handler = logging.StreamHandler(log_stream)
-_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logger.addHandler(_handler)
+handler = logging.StreamHandler(log_stream)
+handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
 
 
-# ---------- auth gate ----------
 def require_connection():
     try:
         QuickBooksAuth().get_valid_access_token()
@@ -62,12 +55,7 @@ def require_connection():
         return False
 
 
-# ---------- chunked processing ----------
-def process_csv_file(file_path, upload_id):
-    """
-    Reads the CSV, groups by Invoice No., and pushes each invoice to QB.
-    Records every invoice outcome to the DB (idempotent), no file moves.
-    """
+def process_csv_file(file_path):
     try:
         qb_auth = QuickBooksAuth()
         qb_client = QuickBooksClient(qb_auth)
@@ -80,25 +68,22 @@ def process_csv_file(file_path, upload_id):
         df = parser.parse_file(file_path)
         logger.info(f"Successfully parsed CSV with {len(df)} rows")
 
-        required_columns = [
-            'Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service',
-            'Description', 'Total Amount', 'Quantity', 'Unit Cost',
-            'Service Date', 'Mode of Payment', 'Is Insurance?',
-        ]
-        missing = [c for c in required_columns if c not in df.columns]
-        if missing:
-            logger.error(f"Missing required columns: {missing}")
+        required_columns = ['Invoice No.', 'Patient Name', 'Patient ID', 'Product / Service',
+                            'Description', 'Total Amount', 'Quantity', 'Unit Cost',
+                            'Service Date', 'Mode of Payment', 'Is Insurance?']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"Missing required columns: {missing_columns}")
             return False, log_stream.getvalue()
 
         results = []
-        invoice_groups = list(df.groupby('Invoice No.'))
+        grouped = df.groupby('Invoice No.')
+        invoice_groups = list(grouped)
         total_invoices = len(invoice_groups)
-        logger.info(f"Found {total_invoices} unique invoices – starting chunked processing")
+        logger.info(f"Found {total_invoices} unique invoices – starting sync")
 
-        # helpers -----------------------------------------------------------
         def parse_money(value):
-            if pd.isna(value):
-                return Decimal('0.00')
+            if pd.isna(value): return Decimal('0.00')
             s = ''.join(c for c in str(value).strip() if c in '0123456789.-')
             return Decimal(s) if s and s not in {'.', '-'} else Decimal('0.00')
 
@@ -125,23 +110,30 @@ def process_csv_file(file_path, upload_id):
                     try:
                         item_row = row.copy()
                         item_row['Product / Service'] = item
+                        
+                        # Resolves to the exact item ID in QuickBooks 
+                        # (If it exists as Inventory, it uses it directly)
                         item_id = product_service.find_or_create_product(item, invoice_num)
+
+                        sales_item_detail = {
+                            "ItemRef": {"value": str(item_id)},
+                            "Qty": 1.0,
+                            "UnitPrice": 0.0,
+                            "TaxCodeRef": {"value": "6"}
+                        }
+
                         line = {
                             "DetailType": "SalesItemLineDetail",
                             "Amount": 0.0,
-                            "SalesItemLineDetail": {
-                                "ItemRef": {"value": str(item_id)},
-                                "Qty": 1.0,
-                                "UnitPrice": 0.0,
-                                "TaxCodeRef": {"value": "6"},
-                            },
+                            "SalesItemLineDetail": sales_item_detail
                         }
                         lines.append(line)
+
                         if for_invoice and product_service.is_pharmacy_item(item_row) and qty_csv > 1:
                             inventory_adjustments.append({
                                 "item_id": item_id,
                                 "real_qty": int(qty_csv),
-                                "description": description or item,
+                                "description": description or item
                             })
                     except Exception as e:
                         logger.warning(f"Item {item!r} failed on {invoice_num}: {e} — skipping")
@@ -150,8 +142,7 @@ def process_csv_file(file_path, upload_id):
                 group._inventory_adjustments = inventory_adjustments
 
             if lines and total_value > 0:
-                total_item_id = product_service.find_or_create_product(
-                    "Total Visit Charges", invoice_num)
+                total_item_id = product_service.find_or_create_product("Total Visit Charges", invoice_num)
                 lines.append({
                     "DetailType": "SalesItemLineDetail",
                     "Amount": float(total_value.quantize(Decimal('0.01'))),
@@ -160,174 +151,116 @@ def process_csv_file(file_path, upload_id):
                         "ItemRef": {"value": str(total_item_id)},
                         "Qty": 1.0,
                         "UnitPrice": float(total_value.quantize(Decimal('0.01'))),
-                        "TaxCodeRef": {"value": "6"},
-                    },
+                        "TaxCodeRef": {"value": "6"}
+                    }
                 })
             return lines
 
-        # main loop ---------------------------------------------------------
-        chunk_size = 50
-        for start in range(0, total_invoices, chunk_size):
-            end = min(start + chunk_size, total_invoices)
-            chunk = invoice_groups[start:end]
-            logger.info(f"Processing chunk {(start//chunk_size)+1}: invoices {start+1}–{end}")
+        for idx, (invoice_num, group) in enumerate(invoice_groups, start=1):
+            transaction_type = "unknown"
+            try:
+                mapper = TransactionMapper()
+                is_insurance = mapper.is_insurance_transaction(group)
 
-            for invoice_num, group in chunk:
-                transaction_type = "unknown"
-                try:
-                    mapper = TransactionMapper()
-                    is_insurance = mapper.is_insurance_transaction(group)
-
-                    if is_insurance:
-                        ins_name = mapper.extract_insurance_name(group)
-                        if ins_name and ins_name.strip():
-                            customer_id = customer_service.find_or_create_customer(
-                                group, mapper, customer_type="insurance",
-                                insurance_name=ins_name.strip())
-                            transaction_type = "invoice"
-                        else:
-                            customer_id = customer_service.find_or_create_customer(
-                                group, mapper, customer_type="patient")
-                            transaction_type = "sales_receipt"
+                if is_insurance:
+                    insurance_name = mapper.extract_insurance_name(group)
+                    if insurance_name and insurance_name.strip():
+                        customer_id = customer_service.find_or_create_customer(
+                            group, mapper, customer_type="insurance", insurance_name=insurance_name.strip())
+                        transaction_type = "invoice"
                     else:
                         customer_id = customer_service.find_or_create_customer(
                             group, mapper, customer_type="patient")
                         transaction_type = "sales_receipt"
+                else:
+                    customer_id = customer_service.find_or_create_customer(
+                        group, mapper, customer_type="patient")
+                    transaction_type = "sales_receipt"
 
-                    # Idempotency
-                    if db.is_already_processed(str(invoice_num), transaction_type):
-                        logger.info(f"Skip {invoice_num} ({transaction_type}): already processed")
-                        results.append({"invoice": invoice_num, "status": "success",
-                                        "transaction_id": "EXISTS", "type": transaction_type})
-                        continue
+                # ---------------------------------------------------------
+                # IDEMPOTENCY GUARD: Skip if already in QB
+                # ---------------------------------------------------------
+                table = "Invoice" if transaction_type == "invoice" else "SalesReceipt"
+                existing = qb_client.query(
+                    f"SELECT Id FROM {table} WHERE DocNumber = '{invoice_num}' MAXRESULTS 1")
+                if (existing.get("QueryResponse", {}).get(table) or existing.get(table)):
+                    logger.info(f"[{idx}/{total_invoices}] SKIP {invoice_num}: already in QB")
+                    results.append({"invoice": invoice_num, "status": "success", "transaction_id": "EXISTS"})
+                    continue
+                # ---------------------------------------------------------
 
-                    delay = min(0.9, max(0.2, 900.0 / max(total_invoices, 1)))
-                    import time; time.sleep(delay)
+                # Rate limiting (matching the old script)
+                delay = min(2.0, max(0.6, 6600.0 / total_invoices))
+                time.sleep(delay)
 
-                    lines = build_lines(group, invoice_num,
-                                        for_invoice=(transaction_type == "invoice"))
-                    if not lines:
-                        logger.warning(f"No lines for invoice {invoice_num}")
-                        continue
+                lines = build_lines(group, invoice_num, for_invoice=(transaction_type == "invoice"))
+                if not lines:
+                    logger.warning(f"No lines for invoice {invoice_num}")
+                    continue
 
-                    if transaction_type == "invoice":
-                        result = invoice_service.create_or_update_invoice(
-                            group, customer_id, lines)
-                        qb_id = (result.get("Invoice") or {}).get("Id", "EXISTS")
-                    else:
-                        result = receipt_service.create_sales_receipt(
-                            group, customer_id, lines)
-                        qb_id = (result.get("SalesReceipt") or {}).get("Id", "EXISTS")
+                if transaction_type == "invoice":
+                    result = invoice_service.create_or_update_invoice(group, customer_id, lines)
+                    qb_id = (result.get('Invoice') or {}).get('Id', 'EXISTS')
+                else:
+                    result = receipt_service.create_sales_receipt(group, customer_id, lines)
+                    qb_id = (result.get('SalesReceipt') or {}).get('Id', 'EXISTS')
 
-                    db.record_invoice(upload_id, str(invoice_num), transaction_type,
-                                      "success", qb_id=qb_id)
-                    results.append({"invoice": invoice_num, "status": "success",
-                                    "transaction_id": qb_id, "type": transaction_type})
+                logger.info(f"[{idx}/{total_invoices}] OK   {invoice_num} -> {qb_id}")
+                results.append({"invoice": invoice_num, "status": "success", "transaction_id": qb_id, "type": transaction_type})
 
-                except Exception as e:
-                    logger.error(f"Error on invoice {invoice_num}: {e}", exc_info=True)
-                    db.record_invoice(upload_id, str(invoice_num), "unknown",
-                                      "error", error_message=str(e))
-                    results.append({"invoice": invoice_num, "status": "error",
-                                    "error": str(e)})
+            except Exception as e:
+                err_msg = str(e)
+                logger.error(f"[{idx}/{total_invoices}] FAIL {invoice_num}: {err_msg}")
+                results.append({"invoice": invoice_num, "status": "error", "error": err_msg})
 
-        # UI log (concise)
-        has_real_error = any(
-            "Failed to refresh QuickBooks token" in l or "400 Client Error" in l
-            for l in log_stream.getvalue().splitlines()
-        )
-        ui_log = "\n".join(log_stream.getvalue().splitlines()[-500:])
-
-        log_processing_result(upload_id, results, archive_files=False)
-        return (not has_real_error), ui_log
+        # Filter logs for UI
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        fail_count = sum(1 for r in results if r['status'] == 'error')
+        
+        summary = f"\nProcessing Complete.\nSucceeded: {success_count}\nFailed: {fail_count}\n\n"
+        if fail_count > 0:
+            summary += "Failed Invoices:\n"
+            for r in results:
+                if r['status'] == 'error':
+                    summary += f"  {r['invoice']}: {r.get('error', 'Unknown')[:150]}\n"
+        
+        ui_log = summary + "\n(System logs written to server output)"
+        
+        return fail_count == 0, ui_log
 
     except QuickBooksAuthError as e:
-        logger.error(f"QuickBooks auth failed: {e}", exc_info=True)
-        return False, f"QuickBooks authentication failed: {e}\nReconnect at /login"
+        logger.error(f"QuickBooks auth failed during processing: {e}", exc_info=True)
+        return False, f"QuickBooks authentication failed: {e}\nPlease reconnect your account at /login"
     except Exception as e:
-        logger.error(f"Failed to process CSV: {e}", exc_info=True)
+        logger.error(f"Failed to process CSV: {str(e)}", exc_info=True)
         return False, log_stream.getvalue()
 
 
-# ---------- routes ----------
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if not require_connection():
-        return jsonify({'success': False,
-                        'error': 'QuickBooks connection lost. Please reconnect at /login.'}), 401
+        return jsonify({'success': False, 'error': 'QuickBooks connection lost. Please reconnect at /login.'}), 401
+
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file'})
-    f = request.files['file']
-    if not f or not f.filename.lower().endswith('.csv'):
+
+    file = request.files['file']
+    if not file or not file.filename.lower().endswith('.csv'):
         return jsonify({'success': False, 'error': 'CSV only'})
 
-    upload_id = db.create_upload(f.filename)
     with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
-        f.save(tmp.name)
+        file.save(tmp.name)
         try:
-            ok, logs = process_csv_file(tmp.name, upload_id)
+            success, logs = process_csv_file(tmp.name)
         finally:
             try: os.unlink(tmp.name)
             except FileNotFoundError: pass
 
     return jsonify({
-        'success': ok,
-        'message': 'Done!' if ok else 'Failed',
-        'upload_id': upload_id,
-        'logs': logs,
+        'success': success,
+        'message': 'Done!' if success else 'Completed with errors',
+        'logs': logs
     })
-# app.py — add these two routes
-
-@app.route('/upload/<int:upload_id>/status')
-def upload_status(upload_id):
-    """
-    Polled by the frontend during and after an upload.
-    Returns the current upload row + any per-invoice errors.
-    """
-    try:
-        upload = db.get_upload(upload_id)
-    except Exception as e:
-        logger.error("upload_status DB error: %s", e, exc_info=True)
-        return jsonify({'error': 'db_error'}), 500
-
-    if not upload:
-        return jsonify({'error': 'not_found'}), 404
-
-    errors = db.get_upload_errors(upload_id, limit=100) \
-        if upload['status'] == 'running' or upload['failed'] > 0 else []
-
-    def _iso(dt):
-        return dt.isoformat() if dt else None
-
-    return jsonify({
-        'id': upload['id'],
-        'filename': upload['filename'],
-        'status': upload['status'],
-        'started_at': _iso(upload['started_at']),
-        'finished_at': _iso(upload['finished_at']),
-        'total_invoices': upload['total_invoices'],
-        'succeeded': upload['succeeded'],
-        'failed': upload['failed'],
-        'errors': [
-            {
-                'invoice_number': e['invoice_number'],
-                'type': e['transaction_type'],
-                'error': (e['error_message'] or '')[:500],
-                'created_at': _iso(e['created_at']),
-            }
-            for e in errors
-        ],
-    })
-
-
-@app.route('/uploads/recent')
-def uploads_recent():
-    """Optional: lists the last 10 uploads. Useful for a 'history' view."""
-    try:
-        return jsonify(db.list_recent_uploads(limit=10))
-    except Exception as e:
-        logger.error("uploads_recent DB error: %s", e, exc_info=True)
-        return jsonify({'error': 'db_error'}), 500
 
 @app.route('/status')
 def status():
@@ -335,60 +268,53 @@ def status():
         return jsonify({'connected': False, 'reason': 'invalid_refresh'})
     return jsonify({'connected': True})
 
-
 @app.route('/')
 def index():
     if not require_connection():
         return redirect('/login')
     return render_template('index.html')
 
-
 @app.route('/login')
 def login():
     url, _ = QuickBooksAuth().get_authorization_url()
     return redirect(url)
 
-
 @app.route('/callback')
 def callback():
+    auth_response_url = request.url
+
     if 'error' in request.args:
-        return (f"QuickBooks authorization failed: "
-                f"{request.args.get('error')} – {request.args.get('error_description','')}", 400)
+        return f"QuickBooks authorization failed: {request.args.get('error')}", 400
+
     if 'code' not in request.args and 'state' not in request.args:
         return "Missing authorization code from QuickBooks", 400
 
     try:
-        tokens = QuickBooksAuth().fetch_tokens(request.url)
+        tokens = QuickBooksAuth().fetch_tokens(auth_response_url)
         session['connected'] = True
         session['realm_id'] = tokens.get("realmId")
-        logger.info("OAuth2 flow completed successfully (realmId=%s)", tokens.get("realmId"))
+        logger.info(f"OAuth2 flow completed successfully! Realm: {tokens.get('realmId')}")
         return redirect('/')
     except Exception as e:
         logger.error("Callback failed", exc_info=True)
-        return f"Authentication failed: {e}", 500
-
+        return f"Authentication failed: {str(e)}", 500
 
 @app.route('/disconnect')
 def disconnect():
     return render_template('disconnect.html')
 
-
 @app.route('/eula')
 def eula():
     return render_template('eula.html')
-
 
 @app.route('/privacy')
 def privacy():
     return render_template('privacy.html')
 
-
 @app.errorhandler(404)
 def not_found(e):
-    if request.path.startswith('/static/'):
-        return "Not found", 404
+    if request.path.startswith('/static/'): return "Not found", 404
     return render_template('index.html'), 200
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 3000)))
