@@ -293,20 +293,24 @@ def upload_stream():
     if not file or not file.filename.lower().endswith('.csv'):
         return "CSV only", 400
 
+    # 1. SAVE THE FILE IMMEDIATELY (before leaving the request context)
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.csv')
     file.save(temp_file.name)
     temp_file.close()
+    temp_path = temp_file.name
 
+    # 2. DEFINE THE GENERATOR (No Flask request access allowed in here!)
     def generate():
         # Clear any old logs from previous runs
-            with stream_handler.queue.mutex:
-                stream_handler.queue.queue.clear()
+        with stream_handler.queue.mutex:
+            stream_handler.queue.queue.clear()
 
-    result_holder = {}
+        result_holder = {}
         
-    def run():
+        def run():
             try:
-                ok, summary = process_csv_file(temp_file.name)
+                # This thread uses temp_path, not request.files
+                ok, summary = process_csv_file(temp_path)
                 result_holder['ok'] = ok
                 result_holder['summary'] = summary
             except Exception as e:
@@ -314,14 +318,14 @@ def upload_stream():
                 result_holder['ok'] = False
                 result_holder['summary'] = str(e)
             finally:
-                try: os.unlink(temp_file.name)
+                try: os.unlink(temp_path)
                 except: pass
                 stream_handler.queue.put("__DONE__")
 
-    thread = threading.Thread(target=run)
-    thread.start()
+        thread = threading.Thread(target=run)
+        thread.start()
 
-    while True:
+        while True:
             try:
                 msg = stream_handler.queue.get(timeout=15)
                 if msg == "__DONE__":
@@ -332,7 +336,7 @@ def upload_stream():
                 # Send a REAL SSE comment line. This forces the proxy to flush bytes.
                 yield ": keep-alive\n\n"
 
-    # Tell proxies (Railway/Cloudflare/Nginx) NOT to buffer this response
+    # 3. RETURN THE STREAM WITH ANTI-BUFFERING HEADERS
     headers = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
