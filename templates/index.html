@@ -381,15 +381,21 @@ Waiting for upload...
                 const decoder = new TextDecoder("utf-8");
                 let buffer = "";
 
-                while (true) {
+                               while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    if (done) {
+                        appendLog('\n[Connection to server closed]\n');
+                        break;
+                    }
                     
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n\n');
                     buffer = lines.pop(); // keep the last partial line
 
                     for (const line of lines) {
+                        // Ignore comments (keep-alives)
+                        if (line.startsWith(':')) continue;
+
                         if (line.startsWith('data: ')) {
                             const dataStr = line.substring(6);
                             try {

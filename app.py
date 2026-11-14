@@ -299,12 +299,12 @@ def upload_stream():
 
     def generate():
         # Clear any old logs from previous runs
-        with stream_handler.queue.mutex:
-            stream_handler.queue.queue.clear()
+            with stream_handler.queue.mutex:
+                stream_handler.queue.queue.clear()
 
-        result_holder = {}
+    result_holder = {}
         
-        def run():
+    def run():
             try:
                 ok, summary = process_csv_file(temp_file.name)
                 result_holder['ok'] = ok
@@ -318,21 +318,28 @@ def upload_stream():
                 except: pass
                 stream_handler.queue.put("__DONE__")
 
-        thread = threading.Thread(target=run)
-        thread.start()
+    thread = threading.Thread(target=run)
+    thread.start()
 
-        while True:
+    while True:
             try:
-                msg = stream_handler.queue.get(timeout=10)
+                msg = stream_handler.queue.get(timeout=15)
                 if msg == "__DONE__":
                     yield f"data: {json.dumps({'type': 'complete', 'success': result_holder.get('ok', False), 'summary': result_holder.get('summary', '')})}\n\n"
                     break
                 yield f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
             except queue.Empty:
-                # Keep-alive to prevent Railway proxy from killing the connection
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                # Send a REAL SSE comment line. This forces the proxy to flush bytes.
+                yield ": keep-alive\n\n"
 
-    return Response(generate(), mimetype='text/event-stream')
+    # Tell proxies (Railway/Cloudflare/Nginx) NOT to buffer this response
+    headers = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+        'Connection': 'keep-alive'
+    }
+    return Response(generate(), headers=headers)
 
 @app.route('/status')
 def status():
